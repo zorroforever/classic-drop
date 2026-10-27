@@ -1,310 +1,145 @@
-# iOpenPod: Free iPod Manager and iTunes Alternative
+# Classic Drop
 
-**Your music. Your iPod.**
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white)](#requirements)
+[![Python: 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](#development)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg?style=plastic)](https://github.com/TheRealSavi/iOpenPod/blob/main/LICENSE)
-[![Platform: Win | Mac | Linux](https://img.shields.io/badge/Platform-Win%20%7C%20Mac%20%7C%20Linux-2ea44f.svg?style=plastic)](#download-and-install)
-[![GitHub: Download latest](https://img.shields.io/badge/GitHub-Download%20latest-0a6fdb?style=plastic)](https://github.com/TheRealSavi/iOpenPod/releases/latest)
-[![GitHub Stars](https://img.shields.io/github/stars/TheRealSavi/iOpenPod?style=plastic\&color=6e5494)](https://github.com/TheRealSavi/iOpenPod/stargazers)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/iopenpod?style=plastic\&color=0a6fdb\&cacheSeconds=86400)](https://pypi.org/project/iopenpod/)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=plastic)](https://discord.gg/9Yy499Tf5d)
+Classic Drop is a native macOS importer for Apple-stock-firmware **iPod Classic** devices. It adds selected music to an existing iPod library without performing the slow, destructive-style full reconciliation associated with legacy iTunes/iTools workflows.
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/johngibbons)
+It is designed for people who want to keep the music already on an iPod, add a few albums quickly, preserve the device's existing database data, and keep album artwork and metadata intact.
 
-iOpenPod is a free, open-source iPod manager and iTunes alternative for
-**Windows, macOS, and Linux**. Sync music from folders on your computer without
-iTunes, browse the library already on your iPod, and edit metadata and playlists.
-Sync Review lets you choose what gets added, updated, or removed.
+> **Important:** Classic Drop is experimental software. Back up the iPod before the first write. The application has been tested against an A1238 iPod Classic with an SSD, but hardware variations and damaged databases are not fully covered.
 
-The target devices are filesystem-accessible **iPod classic, iPod mini, iPod nano,
-and earlier full-size iPods**. Audio, video, photo, and podcast capabilities depend
-on the model. Media conversion uses separately installed FFmpeg and FFprobe.
-See [iPod compatibility](#ipod-compatibility) before getting started.
+## Highlights
 
-[Website](https://iopenpod.com) ·
-[Install help](https://iopenpod.com/install-help/) ·
-[iPod guides](https://iopenpod.com/guides/) ·
-[Discord](https://discord.gg/9Yy499Tf5d) ·
-[Support development](https://ko-fi.com/johngibbons)
+- **Incremental import:** appends selected tracks and does not remove existing songs during a normal import.
+- **Apple database support:** reads and writes the stock-firmware `iTunesDB` and `ArtworkDB` through the iOpenPod database layer.
+- **Metadata editing:** review and edit title, artist, album, album artist, disc number, and track number before import.
+- **Artwork preservation:** uses embedded artwork or nearby `cover`, `folder`, and `front` images, then writes device-compatible artwork.
+- **Existing-library browser:** inspect the current iPod library without editing it; search by track, artist, or album.
+- **Album view:** switch between a track list and an artwork grid, then double-click an album to inspect its tracks, year, duration, and cover.
+- **Duplicate-aware queue:** likely duplicates are unchecked by default and can be reviewed before import.
+- **Recovery:** interrupted writes keep a recovery record and expose a restore action in the app.
+- **Read-only device discovery:** connecting, discovering, and browsing do not modify the iPod.
 
-![iOpenPod album library with album artwork and the selected album track list](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/album-library.webp)
+## Scope and non-goals
 
-## Download and install
+Classic Drop currently targets:
 
-<!-- markdownlint-disable MD033 -->
+- macOS hosts;
+- Apple-stock-firmware iPod Classic devices;
+- filesystem-accessible devices with a readable iTunes database;
+- music import and artwork/metadata handling.
 
-<a href="https://get.microsoft.com/installer/download/9p2lxchhwlg9?referrer=appbadge" target="_self" >
-    <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
-</a>
-<!-- markdownlint-enable MD033 -->
+The following are intentionally out of scope:
 
-Native downloads for Windows, macOS, and Linux are available on the
-[latest release page](https://github.com/TheRealSavi/iOpenPod/releases/latest).
-Choose your platform below; these downloads do not require a separate Python installation.
-See the [installation guide](https://iopenpod.com/install-help/) for setup and troubleshooting.
+- Rockbox-managed devices;
+- iPod touch, iPhone, or iPod shuffle;
+- deleting an arbitrary existing song or album from the stock library;
+- replacing Finder/iTunes device management;
+- cloud music services or online metadata lookup.
 
-| Platform              | Latest release assets                                                           | Installation                                                           |
-| --------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Windows x64           | [Windows x86\_64 ZIP](https://github.com/TheRealSavi/iOpenPod/releases/latest)  | Extract `iOpenPod.exe` and run it.                                     |
-| macOS · Apple Silicon | [macOS arm64 DMG](https://github.com/TheRealSavi/iOpenPod/releases/latest)      | Open the image and drag `iOpenPod.app` to Applications.                |
-| macOS · Intel         | [macOS x86\_64 DMG](https://github.com/TheRealSavi/iOpenPod/releases/latest)    | Open the image and drag `iOpenPod.app` to Applications.                |
-| Linux x64             | [Linux x86\_64 tar.gz](https://github.com/TheRealSavi/iOpenPod/releases/latest) | Extract the complete folder and run its top-level `iOpenPod` launcher. |
+An import is append-only. Removing one existing track or album is not implemented as an independent operation; use a full library-management tool for that workflow. The **Restore last import** action is limited to the most recent Classic Drop import and is not a general deletion feature.
 
-On Windows, keep the file name as `iOpenPod.exe` and place it in a folder you can write to
-on a fixed NTFS drive for in-app updates. Windows users can also install through
-[Microsoft Store](https://apps.microsoft.com/detail/9P2LXCHHWLG9).
+## Requirements
 
-On macOS, launch from Applications after copying the app and ejecting the DMG.
-The build targets macOS 12.3 or later. Current downloads are ad-hoc signed and not
-notarized. Follow the [Mac setup guide](https://iopenpod.com/install-help/#native-macos)
-for first-launch approval in **System Settings → Privacy & Security**. Choose a
-DMG to install; the ZIPs labeled `sparkle-update` are reserved for the built-in updater.
+- macOS 12.3 or later;
+- Python 3.12 for development builds;
+- a mounted, filesystem-accessible Apple iPod Classic;
+- `uv` for the development workflow;
+- `ffmpeg` and `ffprobe` on `PATH` when importing formats that need conversion.
 
-On Linux, extract into a folder you can write to, preserve executable permissions,
-and keep the whole `iOpenPod` folder together. Always start its top-level launcher,
-including after an update. The binary is built on Ubuntu 24.04 and requires glibc
-2.39 or later plus desktop libraries.
+When Finder shows the iPod, Classic Drop can inspect it. Avoid running another application that is writing the iPod database at the same time. Finder's automatic device handling may eject or lock the volume; use one manager at a time and safely eject before disconnecting.
 
-Mac App Store, Flathub, and Snap Store remain planned. Check the
-[website](https://iopenpod.com/#install) for channel availability.
-
-### Updating a GitHub installation
-
-iOpenPod checks for updates at launch. You can also use **Settings → About →
-Check for updates**. About shows your current version and Install Channel.
-
-* **Windows and Linux:** choose **Update now** to download the update, then
-  **Restart to install** when ready. Save any Library Draft and finish running
-  workflows first. Close other iOpenPod instances before restarting.
-
-* **macOS:** choose **Update now** after saving your work, then follow the built-in
-  updater's installation and relaunch prompts.
-
-Installation requires your choice. If an older build only offers **Open download
-page**, or cannot update itself, install the latest download from above manually.
-Older Linux directory bundles should be replaced by extracting the new archive
-into a fresh folder.
-Microsoft Store installations update through the Store.
-
-### Install from PyPI with uv
-
-First [install uv](https://docs.astral.sh/uv/getting-started/installation/),
-then run:
+## Install a development build
 
 ```shell
-uv tool install iopenpod
+git clone https://github.com/zorroforever/classic-drop.git
+cd classic-drop
+uv sync --locked
+uv run classic-drop
 ```
 
-Launch the app with `iopenpod`. For updates, choose **Update now**, then
-**Restart to install** in the app. Or manually run
+The current repository is primarily a source distribution. A signed/notarized release installer is not published yet.
 
-```shell
-uv tool upgrade iopenpod
-```
-
-### Media tools
-
-**FFmpeg and FFprobe** are installed separately for media conversion and inspection.
-**Chromaprint's fpcalc** is optional, installed separately, and enables acoustic
-matching during Sync.
-
-The startup popup or **Settings → Media Tools → Set Up Media Tools** can install
-missing tools after you choose **Install Missing Tools**. Native setup uses WinGet,
-Homebrew, or a supported Linux package manager.
-
-## What you can do
-
-* **Albums, artists, genres, and tracks.** Browse artwork, search your collection,
-  and edit metadata and ratings.
-
-* **Playlists and Smart Playlists.** Arrange tracks, organize playlist folders,
-  and create rule-based selections.
-
-* **Automatic media conversion.** Convert audio and video when needed and prepare
-  artwork for your iPod model. Choose how incoming media is encoded in Settings.
-
-* **Playback and Synesthesia.** Listen to supported tracks with desktop media
-  controls and explore music-reactive visuals.
-
-* **Photos.** Browse Photo Albums, inspect device-sized images, and export retained
-  originals and supported image representations.
-
-* **Podcasts.** Find shows, manage subscriptions, and refresh feeds and artwork.
-  Online discovery requires an internet connection.
-
-* **Scrobbling.** Optionally submit iPod music plays to Last.fm and ListenBrainz.
-
-* **Backup Snapshots.** Capture, browse, annotate, export, and restore local backups.
-  Interrupted writes expose explicit recovery actions.
-
-* **Appearance and conversion settings.** Choose light, dark, or system appearance
-  and configure how incoming media is prepared.
-
-Library edits save automatically by default. Enable **Draft all changes** to review
-and save those edits together. Sync always has its own selection and review flow.
-
-| Track metadata                                                                                                                                                                                | Track artwork                                                                                                                                                                             |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Edit Track dialog with title, artist, album, genre, composer, and track metadata](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/track-metadata.webp) | ![Edit Track artwork tab with cover art and controls to choose or clear artwork](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/track-artwork.webp) |
-
-| Smart Playlists                                                                                                                                                              | Backup Snapshots                                                                                                                                                                         |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Smart Playlist editor with rules for music released before 2000](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/smart-playlist.webp) | ![Backups page with saved Backup Snapshots and restore actions for the selected iPod](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/backups.webp) |
-
-![Audio transcoding settings for encoder, bitrate, lossless conversion, and spoken-word media](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/audio-transcoding-settings.webp)
-
-## How to use
-
-1. **Connect your iPod** and select it in the device picker. Your operating system
-   must be able to mount and access it. Browse your library, play tracks, or edit
-   metadata and playlists.
-2. **Capture a Backup Snapshot** of the data you want to preserve.
-3. **Choose Sync with Host**, add media folders, and select what to scan.
-4. **Select your media**, then review additions, updates, and removals. Removal
-   candidates start unchecked.
-5. **Sync Selected** prepares compatible media and publishes verified changes.
-   Use the app’s eject action when you are finished.
-
-Optional acoustic matching helps recognize the same recording after format or
-metadata changes. Sync can also recognize media from a previous successful Sync
-without generating a new fingerprint.
-
-| Media folders                                                                                                                                                                              | Sync selection                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Choose Media Folders dialog with per-folder media types and subfolder scanning](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/media-folders.webp) | ![Sync media selection with albums grouped as selected, mixed, and deselected](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/sync-media-selection.webp) |
-
-![Sync Review with selected additions, unchecked removals, and items needing attention](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/sync-change-review.webp)
-
-## iPod compatibility
-
-iOpenPod targets these iPod families. Available features depend on the model.
-
-| Family                | Target                                             |
-| --------------------- | -------------------------------------------------- |
-| iPod and iPod classic | Full-size generations 1–5.5 and the classic family |
-| iPod mini             | 1st and 2nd generation                             |
-| iPod nano             | 1st–7th generation                                 |
-
-**iPod shuffle, iPod touch, and iPhone are not yet supported.** The computer
-must already be able to read and write the iPod’s filesystem.
-
-### Guides for your iPod
-
-* [Sync an iPod without iTunes](https://iopenpod.com/guides/sync-ipod-without-itunes/)
-  — choose media folders and review your first Sync.
-* [Check iPod compatibility](https://iopenpod.com/guides/ipod-compatibility/)
-  — understand model and filesystem requirements.
-* [Put FLAC music on an iPod](https://iopenpod.com/guides/flac-to-ipod/)
-  — convert supported source files for your model during Sync.
-* [Troubleshoot an iPod that is not detected](https://iopenpod.com/guides/ipod-not-detected/)
-  — check the connection and whether the computer can access the device.
-
-![Photo Library with the Manage Albums dialog and selected photo inspector](https://raw.githubusercontent.com/TheRealSavi/iOpenPod/main/website/screenshots/iop2/photo-albums.webp)
-
-## Develop and contribute
-
-Clone the repository, open its directory, and use the locked UV environment:
+## Build the macOS application
 
 ```shell
 uv sync --locked
-uv run python scripts/prepare_qt_typing.py
-uv run iopenpod
+uv run pyinstaller --clean --noconfirm packaging/classic-drop.spec
+open "dist/Classic Drop.app"
 ```
 
-The typing preparation command gives Pylance and Mypy the same corrected Qt 6.9.3
-annotations on macOS without replacing the runtime. Run it after syncing or
-recreating the environment; VS Code's **Environment: Sync** and **Typecheck: Mypy**
-tasks include it. Newer Qt versions use their bundled stubs. See
-[development typing](typings/README.md) for details and remaining platform diagnostics.
+The generated application is an Apple Silicon build when built on the current development machine. Packaging includes the bundled SVG glyph assets required by the toolbar and album placeholders.
 
-Before submitting changes, run the repository checks:
+## Typical workflow
+
+1. Connect the iPod and wait for macOS to mount it.
+2. Open Classic Drop and choose **Refresh** if the device is not listed.
+3. Select the iPod. The **iPod Library** tab is read-only and can be searched in list or album mode.
+4. Open **To Import**, add files or a folder, and review the detected metadata and artwork.
+5. Leave unwanted or duplicate tracks unchecked, then explicitly choose **Import Selected**.
+6. Wait for verification to finish and use the app's eject action before disconnecting.
+
+No physical write is performed by discovery, selection, library browsing, search, or album browsing. The commit step is the operation that publishes new music to the iPod.
+
+## Development
+
+The project uses a `src/` layout and a locked `uv` environment.
 
 ```shell
-uv lock --check
-uv run ruff format --check .
-uv run ruff check .
-uv run rumdl check .
-uv run mypy
-uv run pytest
+uv sync --locked
+uv run pytest -q tests/classic_drop tests/iOpenPod/GUI/presentation/test_icons.py
+uv run ruff check src/classic_drop tests/classic_drop packaging/classic-drop.spec
+uv run mypy src/classic_drop
 ```
 
-Hardware testing, platform testing, reproducible bug reports, and focused pull
-requests all help. For bug reports, include your iPod model, operating system,
-iOpenPod version, and steps to reproduce the problem.
+The Classic Drop implementation is split into:
 
-Keep each pull request focused on one change. Discuss proposed work in an issue or
-on [Discord](https://discord.gg/9Yy499Tf5d) before starting, especially for major
-changes, so we can agree on the approach.
+- `src/classic_drop/engine.py` - append-only import and recovery orchestration;
+- `src/classic_drop/worker.py` - serialized device/media operations;
+- `src/classic_drop/window.py` - Qt application window and import/library workflows;
+- `src/classic_drop/albums.py` - album grouping, artwork cards, and album presentation;
+- `tests/classic_drop/` - engine, media, worker, and UI regression tests.
 
-The application ships as one distribution with four internal boundaries:
+The underlying iPod database and storage code is provided by the iOpenPod project in this repository. See [`CLASSIC_DROP.md`](CLASSIC_DROP.md), the architecture records in [`docs/adr/`](docs/adr/), and the upstream acknowledgements for additional context.
 
-| Package               | Responsibility                                 |
-| --------------------- | ---------------------------------------------- |
-| `src/iOpenPod`        | Application workflows, state, and GUI          |
-| `src/device_registry` | iPod identity and capabilities                 |
-| `src/iPodDB`          | iPod database formats                          |
-| `src/storage`         | Safe filesystem and removable-media operations |
+## Device safety
 
-Read [AGENTS.md](https://github.com/TheRealSavi/iOpenPod/blob/main/AGENTS.md), the [project context](https://github.com/TheRealSavi/iOpenPod/blob/main/CONTEXT.md), and the
-[documentation map](https://github.com/TheRealSavi/iOpenPod/blob/main/docs/README.md) before making substantial changes.
-[Packaging](https://github.com/TheRealSavi/iOpenPod/blob/main/docs/packaging.md) covers native builds and store release gates;
-[website maintenance](https://github.com/TheRealSavi/iOpenPod/blob/main/website/README.md) covers screenshots and channel activation.
+Before testing against real hardware:
 
-## Related projects
+1. make a complete backup of the iPod contents;
+2. confirm the iPod can be mounted and ejected normally by macOS;
+3. close Finder/iTunes-like managers that may write the same database;
+4. start with a small import and verify it on the iPod before importing a large batch;
+5. keep the device connected until Classic Drop reports completion or recovery availability.
 
-* [libgpod](https://github.com/gtkpod/libgpod) - C library for iPod database access (the reference implementation this project learned from)
+Classic Drop never promises that a damaged or concurrently modified database can be repaired. Recovery records improve the failure path, but they are not a substitute for a backup.
 
-* [gtkpod](https://github.com/gtkpod/gtkpod) - GTK+ iPod manager
+## Status
 
-* [Rockbox](https://www.rockbox.org/) - Open-source firmware replacement for iPods
+Classic Drop is an alpha-quality, hardware-focused project. The current known-good scenario is an A1238 iPod Classic with an SSD, Apple stock firmware, a readable iTunes database, and a macOS host. More iPod generations, Intel macOS builds, release signing, and broader hardware fixtures still need validation.
 
-## Coming from iTunes or another iPod manager?
+Bug reports should include:
 
-iOpenPod works with the library on your iPod and media folders on your computer.
-Start by browsing the existing library and capturing a Backup Snapshot, then choose
-what to bring over in Sync Review.
+- iPod model number and firmware details;
+- whether the storage was replaced;
+- macOS version and CPU architecture;
+- whether Finder mounted the iPod and whether disk use was enabled;
+- the exact operation and any visible error text;
+- relevant logs from **More -> Show backups and logs**.
 
-* **No separate libgpod installation.** iOpenPod uses its own Python iPod database
-  implementation, informed by libgpod and gtkpod research.
+Please remove personal music paths and serial numbers from logs before publishing them.
 
-* **All features are free.** Donations support development without unlocking features.
+## License and acknowledgements
 
-* **Review before writing.** Sync shows planned changes, with removals unchecked by
-  default. Backup Snapshots are user-controlled, and interrupted writes have
-  explicit recovery actions.
+Classic Drop is licensed under the [GNU General Public License v3.0 or later](LICENSE). It reuses the iOpenPod 2.0.15 database, storage, and application components; see [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md), [`COPYING.md`](COPYING.md), and [`packaging/third-party/`](packaging/third-party/) for attribution and third-party license information.
 
-***
+## Roadmap
 
-## Star history
-
-<!-- markdownlint-disable MD033 -->
-
-<a href="https://www.star-history.com/?repos=therealsavi%2Fiopenpod&type=timeline&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=therealsavi/iopenpod&type=timeline&theme=dark&legend=top-left&sealed_token=aMCIa4pbVoIhlxj9qK6fW6xT1G5WPmVyftpcUHMTDCF-jNcb-ZD5ewReZkCnZxjUqpEYILAoYH1UP1nYDNyqT1PbhUaA09JI1Lrq1EZ2-mO9bYPn3EWaHyBxmimY3pGYha3MHx1aNeAXRuF0UoijWcDkCgvNBHYDbZNCLG6zG8wx6tDuSh8cmrTN0uas" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=therealsavi/iopenpod&type=timeline&legend=top-left&sealed_token=aMCIa4pbVoIhlxj9qK6fW6xT1G5WPmVyftpcUHMTDCF-jNcb-ZD5ewReZkCnZxjUqpEYILAoYH1UP1nYDNyqT1PbhUaA09JI1Lrq1EZ2-mO9bYPn3EWaHyBxmimY3pGYha3MHx1aNeAXRuF0UoijWcDkCgvNBHYDbZNCLG6zG8wx6tDuSh8cmrTN0uas" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=therealsavi/iopenpod&type=timeline&legend=top-left&sealed_token=aMCIa4pbVoIhlxj9qK6fW6xT1G5WPmVyftpcUHMTDCF-jNcb-ZD5ewReZkCnZxjUqpEYILAoYH1UP1nYDNyqT1PbhUaA09JI1Lrq1EZ2-mO9bYPn3EWaHyBxmimY3pGYha3MHx1aNeAXRuF0UoijWcDkCgvNBHYDbZNCLG6zG8wx6tDuSh8cmrTN0uas" />
- </picture>
-</a>
-
-<!-- markdownlint-enable MD033 -->
-
-***
-
-## Support
-
-iOpenPod is free and open source. Donations are optional and help support development.
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/johngibbons)
-
-## License and credits
-
-Licensed under **GPL-3.0-or-later**. All features are free; optional
-[donations](https://ko-fi.com/johngibbons) support development without unlocking
-features. See [LICENSE](https://github.com/TheRealSavi/iOpenPod/blob/main/LICENSE), [COPYING.md](https://github.com/TheRealSavi/iOpenPod/blob/main/COPYING.md), and
-[ACKNOWLEDGEMENTS.md](https://github.com/TheRealSavi/iOpenPod/blob/main/ACKNOWLEDGEMENTS.md) for the license grant and third-party
-credits, including HASHAB, libgpod, and gtkpod research. The application icon has
-separate permission terms documented with its assets.
-
-Independent software, not affiliated with or endorsed by Apple Inc. iPod and
-iTunes are trademarks of Apple Inc.
+- signed and notarized macOS release artifacts;
+- wider A1238 and iPod Classic fixture coverage;
+- safer import preview for low-space devices;
+- explicit per-track/per-album removal with a separate, opt-in workflow;
+- richer release metadata and optional online artwork lookup.
