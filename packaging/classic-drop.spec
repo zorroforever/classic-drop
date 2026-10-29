@@ -16,6 +16,7 @@ datas: list[tuple[str, str]] = []
 for package in ("device_registry", "iPodDB", "storage", "tzdata"):
     datas += collect_data_files(package)
 datas += collect_data_files("iOpenPod", includes=["assets/glyphs/*.svg"])
+datas += collect_data_files("classic_drop", includes=["assets/*.png"])
 datas += [
     (str(catalog), "classic_drop/translations")
     for catalog in (root / "src/classic_drop/translations").glob("*.qm")
@@ -54,8 +55,10 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Classic Drop.app",
+        icon=str(root / "src/classic_drop/assets/classic-drop.icns"),
         bundle_identifier="local.classicdrop.app",
         info_plist={
+            "CFBundleName": "Classic Drop",
             "CFBundleDisplayName": "Classic Drop",
             "CFBundleShortVersionString": "0.1.0",
             "CFBundleVersion": "0.1.0",

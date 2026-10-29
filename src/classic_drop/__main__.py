@@ -9,6 +9,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from classic_drop.branding import configure_application
 from classic_drop.window import MainWindow
 from iOpenPod.GUI.presentation.display import configure_display
 
@@ -29,8 +30,7 @@ def main() -> int:
     )
     configure_display()
     app = QApplication(sys.argv)
-    app.setApplicationName("Classic Drop")
-    app.setOrganizationName("Classic Drop")
+    configure_application(app)
     window = MainWindow(directory=directory)
     window.show()
     return app.exec()

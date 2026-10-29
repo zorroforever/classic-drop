@@ -4,7 +4,7 @@ Classic Drop 是 macOS 上面向 Apple 原厂固件 iPod Classic 的增量导入
 
 ## 使用
 
-开发环境中运行：
+开发环境中运行（直接使用 Python 解释器，系统切换器名称可能仍显示 Python）：
 
 ```shell
 uv sync --locked
@@ -17,6 +17,11 @@ uv run classic-drop
 uv run pyinstaller --clean --noconfirm packaging/classic-drop.spec
 open "dist/Classic Drop.app"
 ```
+
+日常测试请打开 `dist/Classic Drop.app`。应用包具有独立的 Classic Drop 名称、
+Bundle Identifier 和银色播放器／蓝色水滴 Dock 图标；不再从终端直接启动 Python
+作为日常入口。修改代码后需重新打包，现有应用包不会自动使用工作区的新代码。
+图标的可编辑 SVG 与 PNG／ICNS 位于 `src/classic_drop/assets/`。
 
 应用数据、日志和主机侧恢复记录位于 `~/Library/Application Support/Classic Drop`。转码需要系统可以找到 `ffmpeg` 和 `ffprobe`；兼容格式会直接复制，不会为了导入而重编码。应用只接受识别为 iPod Classic 且曲库可读的设备，Rockbox 不在范围内。
 
