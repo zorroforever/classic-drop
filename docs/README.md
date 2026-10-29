@@ -47,4 +47,15 @@ sessions.
 - [`research/`](research/) — supporting investigation and reference material.
 
 Private plans and work items belong under `.scratch/` at the repository root. That
-directory is intentionally excluded from version control.
+directory is intentionally excluded from version control. Public product roadmaps and
+design handoffs may be published under the relevant `docs/` subdirectory when a
+feature needs to continue across machines.
+
+## Classic Drop
+
+Classic Drop 的后续功能规划、macOS UI 设计和当前开发状态：
+
+- [`classic-drop/roadmap.md`](classic-drop/roadmap.md) — 产品需求与分阶段路线图，包含批量删除、导入查重、多语言、容量预估和发布验证。
+- [`classic-drop/ui-design.md`](classic-drop/ui-design.md) — macOS 风格 UI 信息架构、交互规范和三语设计要求。
+- [`classic-drop/development.md`](classic-drop/development.md) — 已确认的开发顺序、任务清单、验证记录和剩余工作。
+- [`classic-drop/ui-concept.svg`](classic-drop/ui-concept.svg) / [`ui-concept.png`](classic-drop/ui-concept.png) — 静态视觉稿（示例数据，非运行截图）。

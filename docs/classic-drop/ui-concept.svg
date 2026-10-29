@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1260" viewBox="0 0 1440 1260" role="img" aria-labelledby="title desc">
+  <title id="title">Classic Drop macOS UI 静态设计提案</title>
+  <desc id="desc">浅色删除工作区、深色导入查重和最终删除复核。所有内容均为示例，不是运行截图。</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-15%" width="120%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#172436" flood-opacity=".10"/></filter>
+    <linearGradient id="nav" x2=".6" y2="1"><stop stop-color="#edf1f6"/><stop offset="1" stop-color="#e2e8ee"/></linearGradient>
+    <clipPath id="window"><rect x="52" y="130" width="1336" height="600" rx="18"/></clipPath>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;fill:#1d1d1f;font-size:13px} .muted{fill:#737780}.tiny{font-size:11px}.small{font-size:12px}.label{font-size:14px;font-weight:600}.headline{font-size:24px;font-weight:650;letter-spacing:-.6px}.white{fill:#fff}.darktext{fill:#f1f1f4}.darkmuted{fill:#a6a9b3}.blue{fill:#007aff}.danger{fill:#bf3539}.line{stroke:#dfe1e6;stroke-width:1}.bold{font-weight:600}
+    </style>
+  </defs>
+  <rect width="1440" height="1260" fill="#f0f2f6"/>
+  <text x="52" y="62" style="font-size:30px;font-weight:650;letter-spacing:-1px">Classic Drop</text>
+  <text x="1388" y="59" text-anchor="end" class="muted small">macOS UI / 设计提案 · 2026.10.28</text>
+  <text x="52" y="92" class="muted">系统式导航与工具栏，清晰的音乐内容，提交前明确复核。</text>
+  <text x="1388" y="92" text-anchor="end" class="muted small">静态稿 · 示例数据 · 尚未开发</text>
+  <rect x="52" y="130" width="1336" height="600" rx="18" fill="#fff" filter="url(#shadow)"/>
+  <g clip-path="url(#window)">
+    <rect x="52" y="130" width="212" height="600" fill="url(#nav)"/>
+    <rect x="264" y="130" width="1124" height="58" fill="#f8f9fb"/>
+    <line x1="264" y1="188" x2="1388" y2="188" class="line"/>
+    <circle cx="78" cy="159" r="6" fill="#ff6058"/><circle cx="98" cy="159" r="6" fill="#ffbd2e"/><circle cx="118" cy="159" r="6" fill="#28c840"/>
+    <rect x="230" y="151" width="15" height="13" rx="3" fill="none" stroke="#7f8590"/><line x1="235" y1="151" x2="235" y2="164" stroke="#7f8590"/>
+    <text x="288" y="164" class="label">批量删除</text><text x="362" y="164" class="muted small">iPod Classic</text>
+    <rect x="1008" y="143" width="264" height="32" rx="16" fill="#e9ebef"/>
+    <circle cx="1025" cy="157" r="5" fill="none" stroke="#777d87" stroke-width="1.5"/><path d="M1029 161l4 4" stroke="#777d87" stroke-width="1.5"/><text x="1044" y="163" class="muted small">搜索当前曲库</text>
+    <rect x="1323" y="150" width="17" height="15" rx="3" fill="none" stroke="#7f8590"/><line x1="1334" y1="150" x2="1334" y2="165" stroke="#7f8590"/>
+    <text x="74" y="222" class="tiny muted bold">工作区</text>
+    <text x="80" y="259" class="label">♫</text><text x="106" y="259">iPod 曲库</text>
+    <text x="81" y="299" class="label">↓</text><text x="106" y="299">待导入</text><text x="237" y="299" text-anchor="end" class="muted small">48</text>
+    <rect x="66" y="314" width="184" height="36" rx="9" fill="#cddbec"/>
+    <path d="M80 329h12m-10 0v11h8v-11m-6-3h4" fill="none" stroke="#274968" stroke-width="1.4" stroke-linecap="round"/><text x="106" y="337" class="bold">批量删除</text><text x="237" y="337" text-anchor="end" class="small bold">12</text>
+    <text x="81" y="379" class="label">↶</text><text x="106" y="379">恢复与记录</text>
+    <line x1="74" y1="590" x2="242" y2="590" stroke="#d0d6df"/>
+    <text x="74" y="618" class="tiny muted bold">当前 iPod</text>
+    <text x="74" y="643" class="label">iPod Classic</text><text x="74" y="665" class="small muted">连接正常 · 示例设备</text>
+    <rect x="74" y="681" width="166" height="4" rx="2" fill="#ccd4dd"/><rect x="74" y="681" width="107" height="4" rx="2" fill="#8b9eb5"/>
+    <text x="74" y="707" class="tiny muted">可用 42.6 GB</text><text x="238" y="707" text-anchor="end" class="small blue">安全弹出</text>
+    <line x1="264" y1="188" x2="264" y2="730" class="line"/>
+    <text x="288" y="224" class="headline">筛选音乐</text><text x="288" y="248" class="muted small">按条件查找，多次加入同一个删除包，最后统一复核。</text>
+    <rect x="288" y="266" width="128" height="29" rx="14.5" fill="#eef3fa"/><text x="301" y="285" class="small">艺人：林序　×</text>
+    <rect x="424" y="266" width="157" height="29" rx="14.5" fill="#eef3fa"/><text x="437" y="285" class="small">年份：2022–2024　×</text>
+    <rect x="589" y="266" width="106" height="29" rx="14.5" fill="#f0f1f4"/><text x="601" y="285" class="small">＋ 添加筛选</text>
+    <text x="288" y="329" class="small muted">匹配 86 首 · 选中 3 首</text><text x="722" y="329" class="small blue">加入全部匹配 86 首</text>
+    <rect x="886" y="309" width="154" height="30" rx="8" fill="#f0f1f4"/><text x="963" y="329" text-anchor="middle" class="small bold">＋ 加入所选 3 首</text>
+    <rect x="280" y="354" width="768" height="30" rx="5" fill="#f5f6f8"/><text x="302" y="374" class="tiny muted">标题 ↑</text><text x="568" y="374" class="tiny muted">艺人</text><text x="711" y="374" class="tiny muted">专辑</text><text x="1018" y="374" text-anchor="end" class="tiny muted">时长</text>
+    <rect x="280" y="388" width="768" height="42" rx="6" fill="#007aff"/>
+    <text x="302" y="414" class="white">晨光</text><text x="568" y="414" class="white">林序</text><text x="711" y="414" class="white">缓慢生长</text><text x="1018" y="414" text-anchor="end" class="white small">3:42</text>
+    <text x="302" y="460">海岸线</text><text x="568" y="460">林序</text><text x="711" y="460">缓慢生长</text><text x="1018" y="460" text-anchor="end" class="small muted">4:08</text>
+    <rect x="280" y="480" width="768" height="42" rx="6" fill="#007aff"/>
+    <text x="302" y="506" class="white">回声</text><text x="568" y="506" class="white">林序</text><text x="711" y="506" class="white">远山来信</text><text x="1018" y="506" text-anchor="end" class="white small">3:56</text>
+    <text x="302" y="552">秋日手记</text><text x="568" y="552">林序</text><text x="711" y="552">远山来信</text><text x="1018" y="552" text-anchor="end" class="small muted">4:21</text>
+    <rect x="280" y="572" width="768" height="42" rx="6" fill="#007aff"/>
+    <text x="302" y="598" class="white">夜航</text><text x="568" y="598" class="white">林序</text><text x="711" y="598" class="white">城市之间</text><text x="1018" y="598" text-anchor="end" class="white small">3:18</text>
+    <text x="302" y="644">雨后</text><text x="568" y="644">林序</text><text x="711" y="644">城市之间</text><text x="1018" y="644" text-anchor="end" class="small muted">4:32</text>
+    <line x1="264" y1="678" x2="1064" y2="678" class="line"/><text x="288" y="707" class="small muted">筛选与组包不修改 iPod</text><text x="1040" y="707" text-anchor="end" class="small muted">同一维度多选 OR · 跨维度 AND</text>
+    <rect x="1064" y="188" width="324" height="542" fill="#f8f9fb"/><line x1="1064" y1="188" x2="1064" y2="730" class="line"/>
+    <text x="1088" y="224" class="label">待删除清单</text><text x="1364" y="224" text-anchor="end" class="small muted">删除包</text>
+    <text x="1088" y="271" style="font-size:34px;font-weight:600">12<tspan class="small muted"> 首音乐</tspan></text><text x="1088" y="293" class="small muted">切换筛选后保留 · 自动去重</text>
+    <line x1="1088" y1="313" x2="1364" y2="313" class="line"/>
+    <text x="1088" y="342">晨光</text><text x="1088" y="361" class="small muted">林序 · 缓慢生长</text><text x="1356" y="349" class="muted">×</text>
+    <text x="1088" y="395">回声</text><text x="1088" y="414" class="small muted">林序 · 远山来信</text><text x="1356" y="402" class="muted">×</text>
+    <text x="1088" y="448">夜航</text><text x="1088" y="467" class="small muted">林序 · 城市之间</text><text x="1356" y="455" class="muted">×</text>
+    <text x="1088" y="501" class="small muted">另有 9 首</text><text x="1364" y="501" text-anchor="end" class="small blue">查看全部</text>
+    <rect x="1088" y="532" width="276" height="73" rx="9" fill="#eef1f5"/><text x="1102" y="556" class="small bold">可恢复删除</text><text x="1102" y="576" class="small muted">音乐原件仍保留在 iPod，</text><text x="1102" y="594" class="small muted">不会立即释放设备空间。</text>
+    <text x="1088" y="630" class="small blue">清空清单</text>
+    <rect x="1088" y="650" width="276" height="37" rx="10" fill="#007aff"/><text x="1226" y="674" text-anchor="middle" class="white bold">复核删除包（12）…</text>
+    <text x="1226" y="711" text-anchor="middle" class="tiny muted">此步骤还不会删除音乐</text>
+  </g>
+  <rect x="52" y="130" width="1336" height="600" rx="18" fill="none" stroke="#cbd1da" stroke-opacity=".7"/>
+  <text x="52" y="788" class="label">导入查重 / 深色</text><text x="740" y="788" class="label">删除前复核 / Sheet</text>
+  <rect x="52" y="810" width="648" height="358" rx="16" fill="#202125" filter="url(#shadow)"/>
+  <text x="76" y="844" class="darktext label">待导入</text><text x="675" y="844" text-anchor="end" class="darkmuted small">48 首 · 查重已结束</text>
+  <rect x="76" y="860" width="92" height="27" rx="13.5" fill="#3a3d45"/><text x="122" y="878" text-anchor="middle" class="darktext small">全部 48</text>
+  <text x="184" y="878" class="darkmuted small">新增 36</text><text x="264" y="878" class="darkmuted small">重复 4</text><text x="340" y="878" class="darkmuted small">历史 3</text><text x="416" y="878" class="darkmuted small">疑似 3</text><text x="492" y="878" fill="#edbc69" style="fill:#edbc69;font-size:12px">检查失败 2</text>
+  <line x1="76" y1="904" x2="676" y2="904" stroke="#3b3d44"/><line x1="399" y1="904" x2="399" y2="1096" stroke="#3b3d44"/>
+  <rect x="76" y="920" width="305" height="40" rx="6" fill="#303b4c"/><rect x="88" y="934" width="13" height="13" rx="3" fill="none" stroke="#9da8b9"/><text x="115" y="946" class="darktext">晨光</text><text x="365" y="946" text-anchor="end" style="fill:#88b7fa;font-size:11px">确认重复</text>
+  <rect x="88" y="984" width="13" height="13" rx="3" fill="#368cf5"/><path d="M91 990l3 3 5-6" fill="none" stroke="white" stroke-width="1.5"/><text x="115" y="996" class="darktext">岛屿</text><text x="365" y="996" text-anchor="end" class="darkmuted tiny">新增</text>
+  <rect x="88" y="1034" width="13" height="13" rx="3" fill="none" stroke="#9da8b9"/><text x="115" y="1046" class="darktext">回声（现场版）</text><text x="365" y="1046" text-anchor="end" style="fill:#edbc69;font-size:11px">疑似重复</text>
+  <text x="421" y="937" class="darktext bold">匹配依据</text><text x="421" y="963" class="darkmuted small">iPod 曲库 → 晨光</text><text x="421" y="987" class="darktext small">文件内容一致（SHA-256）</text><text x="421" y="1011" class="darkmuted small">本项默认跳过，保留现有音乐。</text>
+  <rect x="421" y="1034" width="115" height="29" rx="7" fill="#3b3d45"/><text x="478" y="1053" text-anchor="middle" class="darktext small">仍然导入</text><text x="556" y="1053" style="fill:#88b7fa;font-size:12px">保持跳过</text>
+  <line x1="76" y1="1096" x2="676" y2="1096" stroke="#3b3d44"/><text x="76" y="1138" class="darkmuted small">已选择 36 首</text><rect x="501" y="1116" width="175" height="32" rx="9" fill="#0a84ff"/><text x="588" y="1137" text-anchor="middle" class="white small bold">复核导入（36）…</text>
+  <rect x="740" y="810" width="648" height="358" rx="16" fill="#e5e8ee"/>
+  <rect x="777" y="833" width="574" height="310" rx="15" fill="#fbfbfd" filter="url(#shadow)"/>
+  <text x="803" y="872" style="font-size:19px;font-weight:650">从 iPod 曲库删除 12 首音乐？</text>
+  <text x="803" y="901" class="muted small">这些音乐会从整个曲库及所有播放列表移除。</text>
+  <rect x="803" y="920" width="522" height="48" rx="8" fill="#f0f2f6"/><text x="819" y="949" class="small">12 首音乐　·　影响 4 个播放列表　·　恢复数据约 0.46 GB</text>
+  <text x="803" y="994" class="small bold">音乐原件保留在 iPod，空间不会立即释放。</text><text x="803" y="1016" class="muted small">完成后可从“恢复与记录”恢复本次操作。</text><text x="803" y="1044" class="small blue">查看本次 12 首音乐的明细 ›</text>
+  <rect x="1013" y="1080" width="78" height="34" rx="9" fill="#e9ebef"/><text x="1052" y="1102" text-anchor="middle" class="small">取消</text><rect x="1103" y="1080" width="222" height="34" rx="9" fill="#c6373e"/><text x="1214" y="1102" text-anchor="middle" class="white small bold">可恢复删除 12 首</text>
+  <text x="52" y="1212" class="muted small">材料效果为静态示意；实际系统外观、深浅色与辅助功能需在 macOS 实机验证。</text>
+  <text x="1388" y="1212" text-anchor="end" class="muted small">Classic Drop / UI Concept 01</text>
+</svg>
