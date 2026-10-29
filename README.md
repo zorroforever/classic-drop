@@ -70,6 +70,19 @@ The current repository is primarily a source distribution. A signed/notarized re
 
 ## Build the macOS application
 
+The approved SwiftUI shell has a separate development build with a bundled
+headless helper. It provides the album grid/detail UI and persistent preparation
+and write progress:
+
+```shell
+uv run python scripts/build_classic_drop_native.py
+open "dist/native/Classic Drop.app"
+```
+
+See [native build and verification](docs/classic-drop-native.md) for build options,
+protocol details and pending platform/hardware acceptance. The source command
+`classic-drop` and the following build retain the Qt reference frontend:
+
 ```shell
 uv sync --locked
 uv run pyinstaller --clean --noconfirm packaging/classic-drop.spec

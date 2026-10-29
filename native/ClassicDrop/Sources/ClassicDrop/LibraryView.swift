@@ -1,0 +1,118 @@
+import SwiftUI
+import ClassicDropCore
+
+struct LibraryView: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var strings: Strings
+    private func t(_ key: String) -> String { strings.text(key) }
+    var body: some View {
+        ZStack {
+            if model.albumMode {
+                grid.opacity(model.openAlbum == nil ? 1 : 0)
+                    .allowsHitTesting(model.openAlbum == nil).accessibilityHidden(model.openAlbum != nil)
+            } else {
+                VStack(spacing: 0) {
+                    TrackTable(tracks: model.tracks, selection: $model.selectedTracks)
+                    if model.tracks.count < model.trackTotal {
+                        Button(t("load.more")) { model.loadTracks(more: true) }.padding(10)
+                    }
+                }
+            }
+            if let album = model.openAlbum { detail(album) }
+        }
+    }
+    private var grid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack {
+                    Text(t("all.albums")).font(.headline)
+                    Spacer()
+                    Text(String(format: t("album.count"), model.albumTotal, model.state?.trackCount ?? 0)).font(.caption).foregroundStyle(.secondary)
+                }
+                if model.albums.isEmpty {
+                    EmptyWorkspace(symbol: "square.stack", title: t("empty.library"), detail: "") {
+                        Button(t("add.files")) { model.addFiles(folder: false) }.disabled(!model.writable)
+                    }.frame(minHeight: 260)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 155, maximum: 230), spacing: 24)], alignment: .leading, spacing: 22) {
+                    ForEach(model.albums) { album in
+                        Button {
+                            model.selectedAlbum = album
+                            model.inspector = true
+                        } label: {
+                            VStack(alignment: .leading, spacing: 7) {
+                                CoverView(id: album.artworkId)
+                                Text(album.title.isEmpty ? t("album.unknown") : album.title)
+                                    .font(.headline).lineLimit(1).foregroundStyle(.primary)
+                                Text(album.artist.isEmpty ? t("artist.unknown") : album.artist)
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(String(format: t("song.count"), album.trackCount) + (album.year > 0 ? " · \(album.year)" : ""))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(11).contentShape(Rectangle())
+                                .background(model.selectedAlbum?.id == album.id ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(model.selectedAlbum?.id == album.id ? Color.accentColor.opacity(0.2) : .clear))
+                        }
+                        .buttonStyle(.plain)
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { model.open(album) })
+                        .contextMenu { Button(t("album.open")) { model.open(album) } }
+                        .accessibilityLabel(album.title + ", " + album.artist)
+                    }
+                }
+                if model.albums.count < model.albumTotal {
+                    Button(t("load.more")) { model.loadAlbums(more: true) }.frame(maxWidth: .infinity)
+                }
+            }.padding(24)
+        }
+    }
+    private func detail(_ album: AlbumDTO) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Button { model.openAlbum = nil; model.selectedTracks = [] } label: { Label(t("albums"), systemImage: "chevron.left") }
+                Spacer()
+                Text(t("library") + " / " + album.artist + " / " + album.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            HStack(alignment: .center, spacing: 24) {
+                CoverView(id: album.artworkId).frame(width: 140)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(album.title).font(.system(size: 30, weight: .bold)).lineLimit(2)
+                    Text(album.artist).font(.title3).foregroundStyle(.secondary)
+                    Text((album.year > 0 ? "\(album.year) · " : "") + String(format: t("song.count"), album.trackCount) + " · " + album.duration)
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            TrackTable(tracks: model.albumTracks, selection: $model.selectedTracks)
+            if model.albumTracks.count < model.detailTotal {
+                Button(t("load.more")) { model.loadDetail(more: true) }
+            }
+        }.padding(24).background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+struct TrackTable: View {
+    let tracks: [TrackDTO]
+    @Binding var selection: Set<String>
+    var showSource = false
+    @EnvironmentObject var strings: Strings
+    var body: some View {
+        Group {
+        if showSource {
+            Table(tracks, selection: $selection) {
+                TableColumn(strings.text("title"), value: \.title).width(min: 130, ideal: 220)
+                TableColumn(strings.text("artist"), value: \.artist).width(min: 90, ideal: 150)
+                TableColumn(strings.text("album"), value: \.album).width(min: 90, ideal: 160)
+                TableColumn(strings.text("source"), value: \.source).width(min: 100, ideal: 160)
+            }
+        } else {
+            Table(tracks, selection: $selection) {
+            TableColumn("#") { Text($0.trackNumber > 0 ? "\($0.trackNumber)" : "—").foregroundStyle(.secondary) }.width(30)
+            TableColumn(strings.text("title"), value: \.title).width(min: 130, ideal: 220)
+            TableColumn(strings.text("artist"), value: \.artist).width(min: 90, ideal: 150)
+            TableColumn(strings.text("album"), value: \.album).width(min: 90, ideal: 160)
+            TableColumn(strings.text("duration"), value: \.duration).width(55)
+            }
+        }
+        }
+        .textSelection(.enabled)
+    }
+}

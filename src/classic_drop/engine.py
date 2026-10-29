@@ -6,6 +6,7 @@ import sqlite3
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
@@ -19,10 +20,12 @@ from iOpenPod.app.library_workspace import LibraryWorkspace
 from iOpenPod.app.library_write import (
     LibraryPreparationRequest,
     LibraryReview,
+    WriteItemProgress,
     WriteProgress,
 )
 from iOpenPod.app.media.importing import relocate_song
 from iOpenPod.app.media.music_paths import MusicPathAllocator
+from iOpenPod.app.media.progress import MediaPreparationProgress
 from iOpenPod.app.models.device import (
     ActiveIPod,
     DeviceCandidate,
@@ -119,10 +122,12 @@ class ClassicDropEngine:
             raise ValueError(source_text("Select an iPod Classic first"))
         return active
 
-    def discover(self) -> tuple[DeviceCandidate, ...]:
+    def discover(self, *, refresh_known: bool = True) -> tuple[DeviceCandidate, ...]:
         return tuple(
             c
-            for c in self.coordinator.discover_devices().candidates
+            for c in self.coordinator.discover_devices(
+                refresh_known=refresh_known
+            ).candidates
             if c.profile is not None and c.profile.family == "iPod Classic"
         )
 
@@ -216,11 +221,43 @@ class ClassicDropEngine:
             old_song = self._songs.get(old_entry.token)
             if old_song is not None:
                 seen.setdefault(old_song.original.sha256, old_entry)
-        entries: list[PreviewEntry] = []
         candidate_index = MetadataCandidateIndex(active.library.tracks)
         with self.coordinator.sync_session(active) as session:
             device_root = session.mounted_volume.mount_point.path.resolve()
-        sources = collect_audio(paths)
+        self.progress(WriteProgress("scan", "Finding music"))
+        sources = collect_audio(
+            paths,
+            checkpoint=checkpoint,
+            discovered=lambda n: self.progress(
+                WriteProgress("scan", "Finding music", n)
+            ),
+        )
+        # Only a complete batch may publish tokens or retain prepared media.
+        with ExitStack() as batch:
+            return self._preview_sources(
+                sources,
+                active,
+                seen,
+                receipts,
+                candidate_index,
+                device_root,
+                checkpoint,
+                batch,
+            )
+
+    def _preview_sources(
+        self,
+        sources: tuple[Path, ...],
+        active: ActiveIPod,
+        seen: dict[str, PreviewEntry],
+        receipts: dict[str, tuple[str, int]],
+        candidate_index: MetadataCandidateIndex,
+        device_root: Path,
+        checkpoint: Callable[[], None],
+        batch: ExitStack,
+    ) -> tuple[PreviewEntry, ...]:
+        entries: list[PreviewEntry] = []
+        songs: dict[str, PreparedSong] = {}
         for index, path in enumerate(sources):
             checkpoint()
             if path in self._entries:
@@ -228,6 +265,15 @@ class ClassicDropEngine:
                 entries.append(entry)
                 if entry.token in self._songs:
                     seen.setdefault(self._songs[entry.token].original.sha256, entry)
+                self.progress(
+                    WriteProgress(
+                        "inspect",
+                        "Inspecting music",
+                        index + 1,
+                        len(sources),
+                        path.name,
+                    )
+                )
                 continue
             self.progress(
                 WriteProgress(
@@ -243,14 +289,23 @@ class ClassicDropEngine:
                         )
                     )
                 prepared = prepare_song(
-                    path, active.profile, self._resources, checkpoint
+                    path,
+                    active.profile,
+                    batch,
+                    checkpoint,
+                    progress=partial(
+                        self._media_progress,
+                        name=path.name,
+                        completed=index,
+                        total=len(sources),
+                    ),
                 )
                 song = prepared.song
                 sha = prepared.original.sha256
                 status, detail = self._duplicate_status(
                     sha, prepared, seen, receipts, active, candidate_index
                 )
-                self._songs[token] = prepared
+                songs[token] = prepared
                 entries.append(
                     PreviewEntry(
                         token,
@@ -283,9 +338,30 @@ class ClassicDropEngine:
                         detail=exception_text(error),
                     )
                 )
+            self.progress(
+                WriteProgress(
+                    "inspect", "Inspecting music", index + 1, len(sources), path.name
+                )
+            )
         checkpoint()
+        self._resources.enter_context(batch.pop_all())
+        self._songs.update(songs)
         self._entries = {entry.path: entry for entry in entries}
         return tuple(entries)
+
+    def _media_progress(
+        self, sample: MediaPreparationProgress, name: str, completed: int, total: int
+    ) -> None:
+        self.progress(
+            WriteProgress(
+                f"media.{sample.phase.value}",
+                sample.message,
+                completed,
+                total,
+                name,
+                active_items=(WriteItemProgress(name, name, sample),),
+            )
+        )
 
     def _duplicate_status(
         self,
@@ -392,7 +468,10 @@ class ClassicDropEngine:
         if not selected:
             raise ValueError(source_text("Select at least one song to import"))
         prepared = []
-        for entry in selected:
+        self.progress(
+            WriteProgress("source.verify", "Verifying source files", 0, len(selected))
+        )
+        for index, entry in enumerate(selected):
             checkpoint()
             item = self._songs.get(entry.token)
             if item is None or entry.path != item.path:
@@ -419,6 +498,15 @@ class ClassicDropEngine:
                         )
                     )
             prepared.append((entry, item))
+            self.progress(
+                WriteProgress(
+                    "source.verify",
+                    "Verifying source files",
+                    index + 1,
+                    len(selected),
+                    item.path.name,
+                )
+            )
         # Validate the retained database before the explicit commit's history
         # reconciliation. Initial selection and preview never reconcile it.
         with self.coordinator.sync_session(active):

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Classic Drop Liquid Glass</title>
+  <desc>A translucent music player with a luminous glass drop.</desc>
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2=".85" y2="1">
+      <stop stop-color="#f8ffff"/><stop offset=".37" stop-color="#d4f4f4"/>
+      <stop offset=".72" stop-color="#b8d1ed"/><stop offset="1" stop-color="#f0e6f2"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffffff"/><stop offset=".52" stop-color="#b4d9e5"/>
+      <stop offset="1" stop-color="#96aec9"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#1e6572"/><stop offset=".52" stop-color="#163b59"/><stop offset="1" stop-color="#222c4a"/>
+    </linearGradient>
+    <linearGradient id="wheel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffffff" stop-opacity=".96"/><stop offset=".5" stop-color="#e6f8f9" stop-opacity=".78"/><stop offset="1" stop-color="#bfd4ed" stop-opacity=".8"/>
+    </linearGradient>
+    <linearGradient id="drop" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#caffff" stop-opacity=".97"/><stop offset=".32" stop-color="#64e4eb" stop-opacity=".89"/>
+      <stop offset=".7" stop-color="#359fdf" stop-opacity=".91"/><stop offset="1" stop-color="#4969d8" stop-opacity=".95"/>
+    </linearGradient>
+    <linearGradient id="light" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffffff" stop-opacity=".75"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="76" y="96" width="872" height="864" rx="200" fill="#243b61" opacity=".13"/>
+  <rect x="82" y="82" width="860" height="860" rx="192" fill="url(#edge)"/>
+  <rect x="88" y="88" width="848" height="848" rx="186" fill="url(#shell)"/>
+  <path d="M275 94h474c101 0 181 76 181 179v26c-15-111-84-180-188-180H282c-104 0-173 69-188 180v-26c0-103 80-179 181-179Z" fill="#fff" opacity=".8"/>
+  <path d="M96 530C291 446 521 454 929 268v187C650 602 354 672 96 700Z" fill="#fff" opacity=".14"/>
+  <rect x="220" y="190" width="584" height="294" rx="50" fill="#f8ffff" opacity=".65"/>
+  <rect x="227" y="197" width="570" height="280" rx="44" fill="url(#screen)"/>
+  <path d="M269 205h486c19 0 34 15 34 34v22L235 393V239c0-19 15-34 34-34Z" fill="url(#light)" opacity=".23"/>
+  <g stroke="#b9fcf7" stroke-width="15" stroke-linecap="round" opacity=".95">
+    <path d="M318 323v34M369 295v91M420 271v139M471 304v73M522 287v108M573 312v57M624 279v124M675 302v79M726 323v34"/>
+  </g>
+  <circle cx="438" cy="687" r="165" fill="#446f94" opacity=".16"/>
+  <circle cx="438" cy="680" r="160" fill="url(#wheel)" stroke="#fff" stroke-opacity=".85" stroke-width="4"/>
+  <circle cx="438" cy="680" r="65" fill="#d0e6ef" fill-opacity=".7" stroke="#f8ffff" stroke-opacity=".8" stroke-width="4"/>
+  <path d="M425 566h26" stroke="#6f99ae" stroke-width="8" stroke-linecap="round"/>
+  <path d="M725 493C694 545 599 633 599 720c0 80 58 138 134 138s134-58 134-138c0-87-96-176-142-227Z" fill="#32699d" opacity=".18"/>
+  <path d="M722 470C691 524 596 615 596 703c0 80 59 139 135 139s135-59 135-139c0-87-97-179-144-233Z" fill="url(#drop)" stroke="#e4ffff" stroke-opacity=".76" stroke-width="5"/>
+  <path d="M722 483C688 540 614 613 607 684c20-70 77-120 115-171 46 55 87 99 122 164-13-67-80-143-122-194Z" fill="#fff" opacity=".55"/>
+  <path d="M650 696c-8 35 0 69 28 94" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity=".38"/>
+  <path d="M731 616v122m-43-43 43 43 43-43" fill="none" stroke="#fff" stroke-width="23" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

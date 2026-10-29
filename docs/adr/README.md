@@ -249,3 +249,5 @@ What becomes easier, harder, required, or prohibited?
 - [ADR-0174: Create missing flat Podcasts counterparts](0174-create-missing-flat-podcasts-counterparts.md)
 - [ADR-0175: Classic Drop for stock-firmware iPod Classic on macOS](0175-classic-drop-append-only-macos.md)
 - [ADR-0176: Use a native Qt workspace shell for Classic Drop](0176-use-a-native-qt-workspace-shell-for-classic-drop.md)
+- [ADR-0177: Recoverable Track removal in Classic Drop](0177-classic-drop-recoverable-track-removal.md)
+- [ADR-0178: Use SwiftUI with a headless Classic Drop helper](0178-use-a-swiftui-shell-with-a-headless-classic-drop-helper.md)
