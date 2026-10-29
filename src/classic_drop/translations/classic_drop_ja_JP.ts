@@ -61,6 +61,11 @@
     <message><source>Connect an iPod with a recoverable Library change.</source><translation>復元可能なライブラリ変更がある iPod を接続してください。</translation></message>
     <message><source>Remove from iPod</source><translation>iPod から削除</translation></message>
     <message><source>Review music removal</source><translation>音楽の削除を確認</translation></message>
+    <message><source>Reviewing selected music</source><translation>選択した音楽を確認中</translation></message>
+    <message><source>Remove {count} songs from the iPod Library?</source><translation>iPod ライブラリから {count} 曲を削除しますか？</translation></message>
+    <message><source>These songs will be removed from the entire Library and all Playlists. Original music files remain on the iPod for recovery; device space will not be freed immediately.</source><translation>これらの曲はライブラリ全体とすべてのプレイリストから削除されます。元の音楽ファイルは復元用に iPod に保持されるため、空き容量はすぐには増えません。</translation></message>
+    <message><source>Unique media retained for recovery: {size}</source><translation>復元用に保持する重複のない音楽ファイルのサイズ：{size}</translation></message>
+    <message><source>Recoverably remove {count} songs</source><translation>{count} 曲を復元可能な状態で削除</translation></message>
     <message><source>Remove {count} songs. {size} of unique media will be retained on the iPod for recovery.</source><translation>{count} 曲を削除します。復元用に {size} の重複しない音楽ファイルを iPod に保持します。</translation></message>
     <message><source>Affected playlists: {count}</source><translation>影響するプレイリスト: {count}</translation></message>
     <message><source>Select at least one song to delete</source><translation>削除する曲を 1 曲以上選択してください</translation></message>

@@ -192,3 +192,156 @@ def test_committed_deletion_keeps_session_recovery_when_local_index_fails(
     assert removed.track_id in {
         track.track_id for track in engine.active.library.tracks
     }
+
+
+@pytest.mark.parametrize("operation", ["import", "delete", "select"])
+def test_pending_removal_recovery_blocks_changes_until_restored(
+    connected: tuple[Device, ClassicDropEngine],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    device, engine = connected
+    before = engine.active.library
+    source = media_file(tmp_path)
+
+    def fail_index(*_args: object, **_kwargs: object) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine.history, "record_operation", fail_index)
+        with pytest.raises(ValueError, match="local recovery index could not be saved"):
+            engine.remove_tracks((before.tracks[0].track_id,), Event())
+    recovery = engine.pending_recovery
+
+    with pytest.raises(ValueError, match="Restore the previous Library change"):
+        if operation == "import":
+            engine.commit(engine.preview((source,), Event()), Event())
+        elif operation == "delete":
+            engine.remove_tracks((before.tracks[1].track_id,), Event())
+        else:
+            engine.select(engine.discover()[0].id)
+
+    assert engine.pending_recovery == recovery
+    engine.restore_last(Event())
+    assert engine.active.library == before
+    device.assert_original()
+    assert engine.pending_recovery is None
+    engine.commit(engine.preview((source,), Event()), Event())
+
+
+def test_removal_preparation_does_not_write_and_commit_uses_issued_review(
+    connected: tuple[Device, ClassicDropEngine], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    device, engine = connected
+    first = engine.active.library.tracks[0]
+    prepared = engine.prepare_removal((first.track_id,), Event())
+    device.assert_original()
+    assert first.track_id in {track.track_id for track in engine.active.library.tracks}
+
+    def cannot_prepare_again(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Commit must use the review already shown to the user")
+
+    monkeypatch.setattr(engine.coordinator, "prepare_library", cannot_prepare_again)
+    result = engine.commit_removal(prepared, Event())
+    assert result.removed == 1
+    assert first.track_id not in {
+        track.track_id for track in engine.active.library.tracks
+    }
+    engine.restore_last(Event())
+    device.assert_original()
+
+
+def test_replaced_removal_review_cannot_be_committed(
+    connected: tuple[Device, ClassicDropEngine],
+) -> None:
+    device, engine = connected
+    first, second = engine.active.library.tracks
+    old = engine.prepare_removal((first.track_id,), Event())
+    current = engine.prepare_removal((second.track_id,), Event())
+    with pytest.raises(ValueError, match="rebuild the removal package"):
+        engine.commit_removal(old, Event())
+    device.assert_original()
+    engine.commit_removal(current, Event())
+    assert tuple(track.track_id for track in engine.active.library.tracks) == (
+        first.track_id,
+    )
+
+
+def test_cancelled_removal_review_cannot_publish(
+    connected: tuple[Device, ClassicDropEngine],
+) -> None:
+    from classic_drop.engine import OperationCancelledError
+
+    device, engine = connected
+    prepared = engine.prepare_removal(
+        (engine.active.library.tracks[0].track_id,), Event()
+    )
+    cancelled = Event()
+    cancelled.set()
+    with pytest.raises(OperationCancelledError):
+        engine.commit_removal(prepared, cancelled)
+    device.assert_original()
+    assert engine.history.latest(engine._identity()) is None
+
+
+def test_completed_recovery_allows_reselection_after_reload_failure(
+    connected: tuple[Device, ClassicDropEngine], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iOpenPod.app.services.device_coordinator import SyncRecoveryRestoredError
+
+    device, engine = connected
+
+    def fail_index(*_args: object, **_kwargs: object) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine.history, "record_operation", fail_index)
+        with pytest.raises(ValueError, match="local recovery index could not be saved"):
+            engine.remove_tracks((engine.active.library.tracks[0].track_id,), Event())
+    recovery = engine.pending_recovery
+    assert recovery is not None
+
+    def fail_reload() -> None:
+        raise OSError("injected reload failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine.coordinator, "discover_devices", fail_reload)
+        with pytest.raises(SyncRecoveryRestoredError, match="could not be reloaded"):
+            engine.restore_last(Event())
+
+    device.assert_original()
+    assert not (device.root / recovery).exists()
+    assert engine.pending_recovery is None
+    engine.select(engine.discover()[0].id)
+    assert engine.active.library == device.active.library
+
+
+def test_completed_indexed_recovery_retires_history_after_flush_warning(
+    connected: tuple[Device, ClassicDropEngine], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iOpenPod.app.services.device_coordinator import SyncCleanupCompletedError
+    from storage import FilesystemSession, FlushResult, TransactionRecovery
+
+    device, engine = connected
+    identity = engine._identity()
+    result = engine.remove_tracks((engine.active.library.tracks[0].track_id,), Event())
+    finalize = FilesystemSession.finalize_transaction
+
+    def unconfirmed_flush(
+        session: FilesystemSession, recovery: TransactionRecovery
+    ) -> FlushResult:
+        finalize(session, recovery)
+        return FlushResult(False, "injected final flush warning")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(FilesystemSession, "finalize_transaction", unconfirmed_flush)
+        with pytest.raises(SyncCleanupCompletedError, match="Safely eject"):
+            engine.restore_last(Event())
+
+    device.assert_original()
+    assert not (device.root / result.recovery_path).exists()
+    assert engine.history.latest(identity) is None
+    assert engine.coordinator.active_ipod is None
+    engine.select(engine.discover()[0].id)
+    assert engine.active.library == device.active.library

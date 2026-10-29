@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -50,7 +51,7 @@ from classic_drop.albums import (
     AlbumSummary,
     group_albums,
 )
-from classic_drop.engine import DeleteResult, ImportResult, PreviewEntry
+from classic_drop.engine import DeleteResult, ImportResult, PreviewEntry, RemovalReview
 from classic_drop.i18n import (
     SYSTEM_LANGUAGE,
     get_language_manager,
@@ -61,7 +62,7 @@ from classic_drop.i18n import (
 from classic_drop.import_view import ImportView
 from classic_drop.library_view import LibraryCell, LibraryView
 from classic_drop.presentation import STYLE, tool
-from classic_drop.removal import removal_media_size
+from classic_drop.removal_review import RemovalReviewDialog
 from classic_drop.removal_view import RemovalView
 from classic_drop.shell import WorkspaceShell
 from classic_drop.worker import Reply, Worker
@@ -452,6 +453,7 @@ class MainWindow(QMainWindow):
                 "select": "Reading library",
                 "preview": "Inspecting music",
                 "commit": "Preparing import",
+                "prepare_delete": "Reviewing selected music",
                 "restore": "Restoring previous library",
                 "eject": "Ejecting device",
             }.get(command, "Working")
@@ -568,7 +570,7 @@ class MainWindow(QMainWindow):
         self._selection_changed()
         self.album_grid.viewport().update()
         self.status.setText(render_text(self._status_message))
-        self.delete_package_button.setText(tr("Remove package from iPod"))
+        self.delete_package_button.setText(tr("Review music removal"))
         self.removal_view.retranslate()
         self.queue_empty_title.setText(tr("Import queue is empty"))
         self.queue_empty_detail.setText(
@@ -606,6 +608,7 @@ class MainWindow(QMainWindow):
         self.folder_button.setEnabled(active and not busy)
         self.table.setEnabled(not busy)
         self.library_table.setEnabled(not busy)
+        self.removal_view.setEnabled(not busy)
         self.remove_button.setEnabled(bool(self._entries) and not busy)
         self.delete_button.setEnabled(
             bool(self._selected_library_track_ids()) and active and not busy
@@ -660,57 +663,48 @@ class MainWindow(QMainWindow):
 
     def _request_remove_tracks(self) -> None:
         package = self.removal_view.package_entries
-        selected_ids = tuple(entry.track.track_id for entry in package)
-        selected = tuple(entry.track for entry in package)
-        if not selected or self._active is None:
+        active = self._active
+        snapshot = self.removal_view.source_snapshot
+        if not package or active is None or snapshot is None or self._busy:
             return
-        selected_set = set(selected_ids)
-        affected_playlists = sum(
-            any(entry.track_id in selected_set for entry in playlist.entries)
-            for playlist in self._active.library.playlists
-        )
-        details = "\n".join(
-            f"{entry.track.title} — {entry.track.artist} — {entry.track.album}  ·  {entry.source_filter}"
-            for entry in package[:12]
-        )
-        if len(selected) > 12:
-            details += "\n…"
-        prompt = tr(
-            "Remove {count} songs. {size} of unique media will be retained on the iPod for recovery."
-        ).format(
-            count=song_count(len(selected)),
-            size=readable_size(
-                removal_media_size(self.removal_view.source_snapshot, selected_ids)
-                if self.removal_view.source_snapshot is not None
-                else 0
+        self._submit(
+            "prepare_delete",
+            (
+                tuple(entry.track.track_id for entry in package),
+                snapshot,
+                active.candidate.id.value,
+                active.database_fingerprint.sha256,
             ),
         )
-        prompt += "\n\n" + tr("Affected playlists: {count}").format(
-            count=song_count(affected_playlists)
-        )
-        prompt += "\n\n" + details
+
+    def _confirm_removal(self, review: RemovalReview) -> None:
+        package = self.removal_view.package_entries
         if (
-            QMessageBox.question(
-                self,
-                tr("Review music removal"),
-                prompt,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            == QMessageBox.StandardButton.Yes
+            self._active is not review.source
+            or tuple(entry.track.track_id for entry in package) != review.track_ids
+            or self.removal_view.source_snapshot != review.source.library
+            or self.removal_view.source_revision
+            != review.source.database_fingerprint.sha256
         ):
-            snapshot = self.removal_view.source_snapshot
-            active = self._active
-            if snapshot is not None:
-                self._submit(
-                    "delete",
-                    (
-                        selected_ids,
-                        snapshot,
-                        active.candidate.id.value,
-                        active.database_fingerprint.sha256,
-                    ),
-                )
+            self._set_status("The Library changed; rebuild the removal package")
+            return
+        dialog = RemovalReviewDialog(review, package, self)
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            dialog.deleteLater()
+        if not accepted:
+            return
+        if (
+            self._active is not review.source
+            or self.removal_view.package_entries != package
+            or self.removal_view.source_snapshot != review.source.library
+            or self.removal_view.source_revision
+            != review.source.database_fingerprint.sha256
+        ):
+            self._set_status("The Library changed; rebuild the removal package")
+            return
+        self._submit("delete", review)
 
     def _add_removal_selection(self) -> None:
         added = self.removal_view.add_to_package(
@@ -1340,6 +1334,9 @@ class MainWindow(QMainWindow):
             self.show_entries(())
             self._update_library_table()
             self._set_status("Library restored")
+        elif command == "prepare_delete":
+            self._set_status("Review music removal")
+            self._confirm_removal(cast("RemovalReview", reply.value))
         elif command == "delete":
             delete_result = cast("DeleteResult", reply.value)
             self.removal_view.clear_package()

@@ -61,6 +61,11 @@
     <message><source>Connect an iPod with a recoverable Library change.</source><translation>连接包含可恢复曲库变更的 iPod。</translation></message>
     <message><source>Remove from iPod</source><translation>从 iPod 移除</translation></message>
     <message><source>Review music removal</source><translation>复核音乐移除</translation></message>
+    <message><source>Reviewing selected music</source><translation>正在复核所选音乐</translation></message>
+    <message><source>Remove {count} songs from the iPod Library?</source><translation>从 iPod 曲库删除 {count} 首音乐？</translation></message>
+    <message><source>These songs will be removed from the entire Library and all Playlists. Original music files remain on the iPod for recovery; device space will not be freed immediately.</source><translation>这些音乐会从整个曲库及所有播放列表移除。音乐原件保留在 iPod 上用于恢复，不会立即释放设备空间。</translation></message>
+    <message><source>Unique media retained for recovery: {size}</source><translation>用于恢复的独立音乐文件大小：{size}</translation></message>
+    <message><source>Recoverably remove {count} songs</source><translation>可恢复删除 {count} 首</translation></message>
     <message><source>Remove {count} songs. {size} of unique media will be retained on the iPod for recovery.</source><translation>移除 {count} 首音乐。{size} 的独立音乐文件会保留在 iPod 上用于恢复。</translation></message>
     <message><source>Affected playlists: {count}</source><translation>受影响的播放列表：{count}</translation></message>
     <message><source>Select at least one song to delete</source><translation>请至少选择一首音乐再删除</translation></message>

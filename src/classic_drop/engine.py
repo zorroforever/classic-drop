@@ -13,9 +13,14 @@ from uuid import uuid4
 from classic_drop.duplicate import MetadataCandidateIndex
 from classic_drop.history import ImportHistory
 from classic_drop.media import PreparedSong, collect_audio, prepare_song
+from classic_drop.removal import removal_media_size
 from iOpenPod.app.display_text import exception_text, source_text
 from iOpenPod.app.library_workspace import LibraryWorkspace
-from iOpenPod.app.library_write import LibraryPreparationRequest, WriteProgress
+from iOpenPod.app.library_write import (
+    LibraryPreparationRequest,
+    LibraryReview,
+    WriteProgress,
+)
 from iOpenPod.app.media.importing import relocate_song
 from iOpenPod.app.media.music_paths import MusicPathAllocator
 from iOpenPod.app.models.device import (
@@ -26,7 +31,9 @@ from iOpenPod.app.models.device import (
 )
 from iOpenPod.app.services.device_coordinator import (
     DeviceCoordinator,
+    SyncCleanupCompletedError,
     SyncRecoveryRequiredError,
+    SyncRecoveryRestoredError,
 )
 from iPodDB.library import ArtworkPixels, LibrarySnapshot
 from storage import DevicePath, HostPath, Storage, capture_host_file
@@ -69,6 +76,14 @@ class DeleteResult:
     recovery_path: str
 
 
+@dataclass(frozen=True, slots=True)
+class RemovalReview:
+    source: ActiveIPod
+    track_ids: tuple[int, ...]
+    library_review: LibraryReview
+    size_bytes: int
+
+
 class ClassicDropEngine:
     def __init__(
         self,
@@ -94,6 +109,7 @@ class ClassicDropEngine:
         self._songs: dict[str, PreparedSong] = {}
         self._preview_active: ActiveIPod | None = None
         self.pending_recovery: str | None = None
+        self._removal_review: RemovalReview | None = None
         self._entries: dict[Path, PreviewEntry] = {}
 
     @property
@@ -111,6 +127,7 @@ class ClassicDropEngine:
         )
 
     def select(self, candidate_id: DeviceCandidateId) -> ActiveIPod:
+        self._require_no_pending_recovery()
         candidate = self.coordinator.discovery.candidate(candidate_id)
         if (
             candidate is None
@@ -163,6 +180,24 @@ class ClassicDropEngine:
     def _checkpoint(self, cancelled: Event) -> None:
         if cancelled.is_set():
             raise OperationCancelledError(source_text("Operation canceled"))
+
+    def _require_no_pending_recovery(self) -> None:
+        if self.pending_recovery:
+            raise ValueError(
+                source_text(
+                    "Restore the previous Library change before importing or deleting music"
+                )
+            )
+
+    def _require_writes_allowed(self) -> None:
+        self._require_no_pending_recovery()
+        operation = self.history.latest_operation(self._identity())
+        if operation is not None and operation[1] == "delete":
+            raise ValueError(
+                source_text(
+                    "Restore the previous Library change before importing or deleting music"
+                )
+            )
 
     def preview(
         self, paths: tuple[Path, ...], cancelled: Event
@@ -348,13 +383,7 @@ class ClassicDropEngine:
 
         checkpoint()
         active = self.active
-        latest_operation = self.history.latest_operation(self._identity())
-        if latest_operation is not None and latest_operation[1] == "delete":
-            raise ValueError(
-                source_text(
-                    "Restore the previous Library change before importing or deleting music"
-                )
-            )
+        self._require_writes_allowed()
         if active is not self._preview_active:
             raise ValueError(
                 source_text("The device or library changed; preview again")
@@ -502,7 +531,26 @@ class ClassicDropEngine:
         expected_device_id: str | None = None,
         expected_database_sha256: str | None = None,
     ) -> DeleteResult:
+        review = self.prepare_removal(
+            track_ids,
+            cancelled,
+            expected_library,
+            expected_device_id,
+            expected_database_sha256,
+        )
+        return self.commit_removal(review, cancelled)
+
+    def prepare_removal(
+        self,
+        track_ids: tuple[int, ...],
+        cancelled: Event,
+        expected_library: LibrarySnapshot | None = None,
+        expected_device_id: str | None = None,
+        expected_database_sha256: str | None = None,
+    ) -> RemovalReview:
         self._checkpoint(cancelled)
+        self._require_writes_allowed()
+        self._removal_review = None
         active = self.active
         if (
             (expected_library is not None and active.library != expected_library)
@@ -517,14 +565,6 @@ class ClassicDropEngine:
         ):
             raise ValueError(
                 source_text("The Library changed; rebuild the removal package")
-            )
-        identity = self._identity()
-        latest_operation = self.history.latest_operation(identity)
-        if latest_operation is not None and latest_operation[1] == "delete":
-            raise ValueError(
-                source_text(
-                    "Restore the previous Library change before importing or deleting music"
-                )
             )
         selected_ids = tuple(dict.fromkeys(track_ids))
         if not selected_ids:
@@ -568,8 +608,30 @@ class ClassicDropEngine:
             for change in review.plan.changes
         ):
             raise ValueError(source_text("The deletion review contains no changes"))
+        self._removal_review = RemovalReview(
+            active,
+            selected_ids,
+            review,
+            removal_media_size(active.library, selected_ids),
+        )
+        return self._removal_review
+
+    def commit_removal(self, review: RemovalReview, cancelled: Event) -> DeleteResult:
+        self._checkpoint(cancelled)
+        self._require_writes_allowed()
+        active = self.active
+        if review is not self._removal_review or review.source is not active:
+            raise ValueError(
+                source_text("The Library changed; rebuild the removal package")
+            )
+        self._removal_review = None
+        identity = self._identity()
         result = self.coordinator.save_library(
-            review, active, self.progress, cancelled, retain_recovery=True
+            review.library_review,
+            active,
+            self.progress,
+            cancelled,
+            retain_recovery=True,
         )
         if result.active is None or not result.recovery_path:
             self.pending_recovery = result.recovery_path or None
@@ -590,8 +652,8 @@ class ClassicDropEngine:
                 )
             ) from error
         return DeleteResult(
-            len(selected),
-            sum(track.size_bytes for track in selected),
+            len(review.track_ids),
+            review.size_bytes,
             result.recovery_path,
         )
 
@@ -599,7 +661,14 @@ class ClassicDropEngine:
         self._checkpoint(cancelled)
         if self.pending_recovery:
             self.discard()
-            recovered = self.coordinator.recover_sync_journal(self.pending_recovery)
+            try:
+                recovered = self.coordinator.recover_sync_journal(self.pending_recovery)
+            except SyncRecoveryRestoredError:
+                self.pending_recovery = None
+                raise
+            except SyncRecoveryRequiredError as error:
+                self.pending_recovery = error.recovery_path
+                raise
             self.pending_recovery = None
             return recovered
         active, identity = self.active, self._identity()
@@ -610,7 +679,12 @@ class ClassicDropEngine:
             )
         recovery, _kind = operation
         self.discard()
-        self.coordinator.recover_failed_sync(active, recovery, self.progress)
+        try:
+            self.coordinator.recover_failed_sync(active, recovery, self.progress)
+        except SyncCleanupCompletedError:
+            self.history.restored(identity, recovery)
+            self.coordinator.close()
+            raise
         self.history.restored(identity, recovery)
         candidate = active.candidate.id
         self.coordinator.discover_devices()
@@ -621,6 +695,7 @@ class ClassicDropEngine:
         self.discard()
 
     def discard(self) -> None:
+        self._removal_review = None
         self._resources.close()
         self._resources = ExitStack()
         self._songs.clear()

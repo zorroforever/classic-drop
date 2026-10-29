@@ -95,7 +95,7 @@ class WorkspaceShell(QWidget):
         self.import_button.setObjectName("primary")
         self.import_button.setDefault(True)
         footer.addWidget(self.import_button)
-        self.delete_package_button = button("Remove package from iPod", "minus")
+        self.delete_package_button = button("Review music removal", "minus")
         self.delete_package_button.setObjectName("primary")
         footer.addWidget(self.delete_package_button)
         content_layout.addLayout(footer)
