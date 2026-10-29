@@ -8,13 +8,16 @@ from PySide6.QtWidgets import QApplication
 from classic_drop.engine import PreviewEntry
 from classic_drop.i18n import (
     CATALOG_DIRECTORY,
+    LanguageManager,
     get_language_manager,
     render_text,
     resolve_language,
+    resolve_system_language,
     song_count,
     tr,
 )
 from classic_drop.window import MainWindow
+from classic_drop.worker import Reply
 from iOpenPod.app.display_text import source_text
 from iOpenPod.app.library_write import WriteProgress
 
@@ -52,25 +55,99 @@ def test_resolves_supported_system_preferences_in_order(preferences, expected):
     assert expected == resolve_language(preferences)
 
 
+def test_falls_back_to_macos_language_preferences_when_qt_reports_c():
+    assert resolve_system_language(["C"], ["ja-CN", "zh-Hans-CN"]) == "ja_JP"
+
+
+def test_follow_system_clears_manual_language_override(app, monkeypatch, tmp_path):
+    from classic_drop import i18n
+
+    monkeypatch.setattr(
+        i18n, "_system_language", lambda: "zh_CN", raising=False
+    )
+    manager = LanguageManager(app, tmp_path)
+    try:
+        manager.set_language("ja_JP")
+        assert manager.language == "ja_JP"
+        manager.set_language("system")
+        assert manager.language == "zh_CN"
+        assert manager.follows_system
+        manager.close()
+        restarted = LanguageManager(app, tmp_path)
+        try:
+            assert restarted.language == "zh_CN"
+            assert restarted.follows_system
+        finally:
+            restarted.close()
+    finally:
+        manager.close()
+
+
+def test_system_language_override_is_resolved_again_on_restart(
+    app, monkeypatch, tmp_path
+):
+    from classic_drop import i18n
+
+    current = {"language": "ja_JP"}
+    monkeypatch.setattr(
+        i18n, "_system_language", lambda: current["language"], raising=False
+    )
+    manager = LanguageManager(app, tmp_path)
+    try:
+        assert manager.language == "ja_JP"
+        assert manager.follows_system
+        current["language"] = "zh_CN"
+    finally:
+        manager.close()
+    restarted = LanguageManager(app, tmp_path)
+    try:
+        assert restarted.language == "zh_CN"
+    finally:
+        restarted.close()
+
+
+def test_language_manager_installs_macos_preferred_catalog_when_qt_reports_c(
+    app, monkeypatch, tmp_path
+):
+    from classic_drop import i18n
+
+    monkeypatch.setattr(i18n.QLocale, "system", lambda: i18n.QLocale("C"))
+    monkeypatch.setattr(i18n, "_apple_language_preferences", lambda: ("ja-CN",))
+    manager = LanguageManager(app, tmp_path)
+    try:
+        assert manager.language == "ja_JP"
+        assert tr("Add files") == "ファイルを追加"
+    finally:
+        manager.close()
+
+
 def test_compiled_catalogs_translate_counts_and_preserve_parameters(languages):
     languages.set_language("zh_CN")
-    assert "2 首" == song_count(2)
-    assert "添加文件" == tr("Add files")
+    assert song_count(2) == "2 首"
+    assert tr("Add files") == "添加文件"
     languages.set_language("ja_JP")
-    assert "2 曲" == song_count(2)
-    assert "ファイルを追加" == tr("Add files")
+    assert song_count(2) == "2 曲"
+    assert tr("Add files") == "ファイルを追加"
     message = source_text("File not found: {path}", path="/音楽/Blue Train.m4a")
-    assert "ファイルが見つかりません：/音楽/Blue Train.m4a" == render_text(message)
+    assert render_text(message) == "ファイルが見つかりません：/音楽/Blue Train.m4a"  # noqa: RUF001
     languages.set_language("en")
-    assert "1 song" == song_count(1)
-    assert "2 songs" == song_count(2)
+    assert song_count(1) == "1 song"
+    assert song_count(2) == "2 songs"
 
 
 def test_user_metadata_is_not_translated(languages):
     languages.set_language("ja_JP")
     message = source_text("File not found: {path}", path="Add files")
-    assert "ファイルが見つかりません：Add files" == render_text(message)
-    assert "opaque diagnostic 0x123" == render_text("opaque diagnostic 0x123")
+    assert render_text(message) == "ファイルが見つかりません：Add files"  # noqa: RUF001
+    assert render_text("opaque diagnostic 0x123") == "opaque diagnostic 0x123"
+
+
+def test_engine_errors_are_templates_not_prelocalized_strings():
+    from classic_drop import engine
+
+    source = Path(engine.__file__).read_text(encoding="utf-8")
+    assert 'raise ValueError(source_text("Select an iPod Classic first"))' in source
+    assert '"File changed; preview it again: {name}", name=item.path.name' in source
 
 
 def test_language_preference_survives_restart(app, languages, tmp_path):
@@ -78,8 +155,8 @@ def test_language_preference_survives_restart(app, languages, tmp_path):
     languages.close()
     restarted = get_language_manager(app, directory=tmp_path)
     try:
-        assert "ja_JP" == restarted.language
-        assert "ファイルを追加" == tr("Add files")
+        assert restarted.language == "ja_JP"
+        assert tr("Add files") == "ファイルを追加"
     finally:
         restarted.close()
 
@@ -88,8 +165,8 @@ def test_invalid_language_does_not_change_active_translation(languages):
     languages.set_language("zh_CN")
     with pytest.raises(ValueError, match="Unsupported"):
         languages.set_language("xx")
-    assert "zh_CN" == languages.language
-    assert "添加文件" == tr("Add files")
+    assert languages.language == "zh_CN"
+    assert tr("Add files") == "添加文件"
 
 
 def test_language_switch_preserves_edits_selection_and_progress(app, languages):
@@ -110,20 +187,39 @@ def test_language_switch_preserves_edits_selection_and_progress(app, languages):
     window.request.connect(lambda command, payload: requests.append(command))
     try:
         languages.set_language("ja_JP")
-        assert "タイトル" == window.table.horizontalHeaderItem(1).text()
+        assert window.table.horizontalHeaderItem(1).text() == "タイトル"
         assert before == window.edited_entries()
-        assert 1 == window.table.currentRow()
-        assert "my search" == window.library_search.text()
-        assert 2 == window.progress.value()
+        assert window.table.currentRow() == 1
+        assert window.library_search.text() == "my search"
+        assert window.progress.value() == 2
         assert window._busy
         assert "one.m4a" in window.status.text()
         assert "音楽を確認中" in window.status.text()
         assert not requests
         languages.set_language("en")
-        assert "Title" == window.table.horizontalHeaderItem(1).text()
+        assert window.table.horizontalHeaderItem(1).text() == "Title"
         assert "Inspecting music" in window.status.text()
     finally:
         window.set_busy(False)
+        window.close()
+
+
+def test_language_menu_offers_system_and_three_named_languages(app, languages):
+    window = MainWindow(start_worker=False)
+    try:
+        assert window.settings_menu.title() == "Settings"
+        assert window.general_menu.title() == "General"
+        assert window.language_menu.title() == "Language"
+        labels = [action.text() for action in window.language_menu.actions()]
+        assert labels == ["Follow system", "English", "简体中文", "日本語"]
+        assert window.language_actions["en"].isChecked()
+        languages.set_language("system")
+        assert window.language_actions["system"].isChecked()
+        languages.set_language("ja_JP")
+        assert window.language_actions["ja_JP"].isChecked()
+        assert window.language_menu.title() == "言語"
+        assert window.language_actions["system"].text() == "システムに従う"
+    finally:
         window.close()
 
 
@@ -135,6 +231,8 @@ def test_translation_catalogs_are_complete_and_keep_placeholders(language):
     assert (CATALOG_DIRECTORY / f"classic_drop_{language}.qm").is_file()
     messages = catalog.findall(".//message")
     assert messages
+    sources = [message.findtext("source", "") for message in messages]
+    assert len(sources) == len(set(sources))
     for message in messages:
         source = message.findtext("source", "")
         translation = message.find("translation")
@@ -150,3 +248,43 @@ def test_translation_catalogs_are_complete_and_keep_placeholders(language):
             }, source
             if message.get("numerus") == "yes":
                 assert "%Ln" in translated, source
+
+
+def test_language_switch_retranslates_connected_device_info(app, languages):
+    window = MainWindow(start_worker=False)
+    window._active = type(
+        "Active",
+        (),
+        {
+            "profile": type(
+                "Profile", (), {"display_name": "iPod Classic", "model_number": "A1238"}
+            )(),
+            "candidate": type("Candidate", (), {"available_bytes": 1024})(),
+            "library": type("Library", (), {"tracks": (None, None)})(),
+        },
+    )()
+    window._update_device_info()
+    try:
+        languages.set_language("ja_JP")
+        assert "2 曲" in window.device_info.text()
+        assert "空き" in window.device_info.text()
+        languages.set_language("en")
+        assert "2 songs" in window.device_info.text()
+        assert "available" in window.device_info.text()
+    finally:
+        window.close()
+
+
+def test_canceled_source_message_does_not_open_error_dialog(app, languages, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    languages.set_language("ja_JP")
+    window = MainWindow(start_worker=False)
+    dialogs = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda _self: dialogs.append(True))
+    try:
+        window._failed("preview", source_text("Operation canceled"), Reply(None, None, False))
+        assert not dialogs
+        assert window.status.text() == "操作をキャンセルしました"
+    finally:
+        window.close()

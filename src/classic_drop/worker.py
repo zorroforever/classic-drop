@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from classic_drop.engine import ClassicDropEngine, PreviewEntry
 from classic_drop.media import decode_cover
+from iOpenPod.app.display_text import SourceText
 from iOpenPod.app.models.artwork import ArtworkRequest
 from iOpenPod.app.models.device import ActiveIPod, DeviceCandidateId
 from storage import HostPath
@@ -28,7 +29,7 @@ class Reply:
 
 class Worker(QObject):
     succeeded = Signal(str, object)
-    failed = Signal(str, str, object)
+    failed = Signal(str, object, object)
     progress = Signal(object)
     stopped = Signal()
 
@@ -105,4 +106,11 @@ class Worker(QObject):
             logging.getLogger(__name__).exception(
                 "Classic Drop operation failed: %s", command
             )
-            self.failed.emit(command, str(error) or type(error).__name__, self.reply())
+            message: str
+            if error.args and isinstance(error.args[0], SourceText):
+                message = error.args[0]
+            elif isinstance(error, ValueError) and "\n" in str(error):
+                message = str(error)
+            else:
+                message = str(error) or type(error).__name__
+            self.failed.emit(command, message, self.reply())

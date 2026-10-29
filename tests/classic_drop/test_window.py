@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from classic_drop.engine import ImportResult, PreviewEntry
+from classic_drop.i18n import song_count
 from classic_drop.window import MainWindow
 from classic_drop.worker import Reply
 from iOpenPod.app.models.artwork import ArtworkImage
@@ -273,11 +274,7 @@ def test_classic_drop_button_glyphs_render_visible_pixels(app):
         "skip-back",
         "music",
     ):
-        image = (
-            glyph_icon(name, 19, QColor("#30383b"))
-            .pixmap(QSize(19, 19))
-            .toImage()
-        )
+        image = glyph_icon(name, 19, QColor("#30383b")).pixmap(QSize(19, 19)).toImage()
         assert any(
             image.pixelColor(x, y).alpha() > 0
             for x in range(image.width())
@@ -311,7 +308,7 @@ def test_library_view_clears_when_device_disconnects(app):
     window._succeeded("discover", Reply((), None, False))
 
     assert window.library_table.rowCount() == 0
-    assert window.library_count.text() == "0 首"
+    assert window.library_count.text() == song_count(0)
     window.close()
 
 
@@ -369,7 +366,7 @@ def test_library_view_clears_when_failed_operation_disconnects_device(app):
     window._failed("commit", "操作取消", Reply(None, None, False))
 
     assert window.library_table.rowCount() == 0
-    assert window.library_count.text() == "0 首"
+    assert window.library_count.text() == song_count(0)
     window.close()
 
 

@@ -16,6 +16,10 @@ datas: list[tuple[str, str]] = []
 for package in ("device_registry", "iPodDB", "storage", "tzdata"):
     datas += collect_data_files(package)
 datas += collect_data_files("iOpenPod", includes=["assets/glyphs/*.svg"])
+datas += [
+    (str(catalog), "classic_drop/translations")
+    for catalog in (root / "src/classic_drop/translations").glob("*.qm")
+]
 binaries = collect_dynamic_libs("wasmtime", search_patterns=["*.dylib", "*.so"])
 hiddenimports = [
     *collect_submodules("tzdata"),

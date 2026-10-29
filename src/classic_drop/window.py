@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
+    QActionGroup,
     QCloseEvent,
     QColor,
     QDesktopServices,
@@ -28,6 +29,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QComboBox,
     QFileDialog,
@@ -64,7 +66,15 @@ from classic_drop.albums import (
     group_albums,
 )
 from classic_drop.engine import ImportResult, PreviewEntry
+from classic_drop.i18n import (
+    SYSTEM_LANGUAGE,
+    get_language_manager,
+    render_text,
+    song_count,
+    tr,
+)
 from classic_drop.worker import Reply, Worker
+from iOpenPod.app.display_text import SourceText, source_text
 from iOpenPod.app.library_write import WriteProgress
 from iOpenPod.app.models.artwork import ArtworkImage
 from iOpenPod.app.models.device import ActiveIPod, DeviceCandidate
@@ -72,11 +82,11 @@ from iOpenPod.GUI.presentation.icons import glyph_icon
 from iPodDB.library import ArtworkPixels, Track
 
 STATUS = {
-    "new": "待导入",
-    "imported": "已导入",
-    "duplicate": "批内重复",
-    "possible_duplicate": "疑似重复",
-    "error": "无法导入",
+    "new": "Queued",
+    "imported": "Already imported",
+    "duplicate": "Duplicate in batch",
+    "possible_duplicate": "Possible duplicate",
+    "error": "Cannot import",
 }
 
 
@@ -123,6 +133,11 @@ class MainWindow(QMainWindow):
         self, *, start_worker: bool = True, directory: Path | None = None
     ) -> None:
         super().__init__()
+        application = cast("QApplication | None", QApplication.instance())
+        if application is None:
+            raise RuntimeError("Classic Drop requires a QApplication")
+        self._language_manager = get_language_manager(application, directory)
+        self._language_manager.languageChanged.connect(self._language_changed)
         self.setWindowTitle("Classic Drop")
         self.resize(1180, 720)
         self.setMinimumSize(940, 580)
@@ -139,6 +154,9 @@ class MainWindow(QMainWindow):
         self._album_artwork: dict[int, QPixmap] = {}
         self._artwork_requests: set[int] = set()
         self._open_album_summary: AlbumSummary | None = None
+        self._device_placeholder = "No iPod Classic connected"
+        self._status_message: str = "Ready"
+        self._current_progress: WriteProgress | None = None
         self._thread: QThread | None = None
         self.worker: Worker | None = None
         self._build()
@@ -167,35 +185,57 @@ class MainWindow(QMainWindow):
         layout.setSpacing(14)
         heading = QHBoxLayout()
         title = QLabel("Classic Drop")
+        self.heading_title = title
         font = QFont()
         font.setPointSize(21)
         font.setWeight(QFont.Weight.DemiBold)
         title.setFont(font)
         heading.addWidget(title)
         heading.addStretch()
-        settings = tool("更多", "settings-sliders")
-        menu = QMenu(settings)
-        menu.addAction("显示备份和日志", self._reveal_data)
-        menu.addAction("关于 Classic Drop", self._about)
-        settings.setMenu(menu)
-        settings.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        heading.addWidget(settings)
+        self.settings_button = tool("Settings", "settings-sliders")
+        menu = QMenu(self.settings_button)
+        self.backups_action = menu.addAction("Show backups and logs", self._reveal_data)
+        self.about_action = menu.addAction("About Classic Drop", self._about)
+        self.settings_menu = menu.addMenu("Settings")
+        self.general_menu = self.settings_menu.addMenu("General")
+        self.language_menu = self.general_menu.addMenu("Language")
+        language_group = QActionGroup(self)
+        language_group.setExclusive(True)
+        self.language_actions = {}
+        for language, label in (
+            (SYSTEM_LANGUAGE, "Follow system"),
+            ("en", "English"),
+            ("zh_CN", "简体中文"),
+            ("ja_JP", "日本語"),
+        ):
+            action = self.language_menu.addAction(label)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, selected=language: (
+                    self._language_manager.set_language(selected)
+                )
+            )
+            language_group.addAction(action)
+            self.language_actions[language] = action
+        self.settings_button.setMenu(menu)
+        self.settings_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        heading.addWidget(self.settings_button)
         layout.addLayout(heading)
 
         device_row = QHBoxLayout()
         self.devices = QComboBox()
         self.devices.setMinimumHeight(34)
-        self.devices.addItem("未连接 iPod Classic", None)
+        self.devices.addItem("No iPod Classic connected", None)
         self.devices.currentIndexChanged.connect(self._select_device)
         device_row.addWidget(self.devices, 1)
-        self.refresh_button = tool("刷新设备", "refresh")
+        self.refresh_button = tool("Refresh devices", "refresh")
         self.refresh_button.clicked.connect(self.refresh)
         device_row.addWidget(self.refresh_button)
-        self.eject_button = tool("安全弹出", "eject")
+        self.eject_button = tool("Safely eject", "eject")
         self.eject_button.clicked.connect(lambda: self._submit("eject"))
         device_row.addWidget(self.eject_button)
         layout.addLayout(device_row)
-        self.device_info = QLabel("未连接设备")
+        self.device_info = QLabel("No device connected")
         self.device_info.setObjectName("muted")
         self.device_info.setWordWrap(True)
         layout.addWidget(self.device_info)
@@ -205,20 +245,20 @@ class MainWindow(QMainWindow):
         library_layout = QVBoxLayout(self.library_page)
         library_toolbar = QHBoxLayout()
         self.library_search = QLineEdit()
-        self.library_search.setPlaceholderText("搜索标题、艺人或专辑")
+        self.library_search.setPlaceholderText("Search title, artist, or album")
         self.library_search.textChanged.connect(self._filter_library)
         library_toolbar.addWidget(self.library_search, 1)
-        self.library_count = QLabel("0 首")
+        self.library_count = QLabel("0 songs")
         self.library_count.setObjectName("muted")
         library_toolbar.addWidget(self.library_count)
         library_layout.addLayout(library_toolbar)
         mode_group = QButtonGroup(self)
         mode_group.setExclusive(True)
         self.list_mode_button = QToolButton()
-        self.list_mode_button.setText("列表")
+        self.list_mode_button.setText("List")
         self.list_mode_button.setCheckable(True)
         self.album_mode_button = QToolButton()
-        self.album_mode_button.setText("专辑")
+        self.album_mode_button.setText("Albums")
         self.album_mode_button.setCheckable(True)
         mode_group.addButton(self.list_mode_button)
         mode_group.addButton(self.album_mode_button)
@@ -229,14 +269,12 @@ class MainWindow(QMainWindow):
         library_toolbar.insertWidget(1, self.album_mode_button)
         self.library_table = QTableWidget(0, 7)
         self.library_table.setHorizontalHeaderLabels(
-            ["标题", "艺人", "专辑", "专辑艺人", "碟", "曲", "时长"]
+            ["Title", "Artist", "Album", "Album artist", "Disc", "Track", "Duration"]
         )
         self.library_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
-        self.library_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
-        )
+        self.library_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.library_table.setAlternatingRowColors(True)
         self.library_table.setShowGrid(False)
         self.library_table.verticalHeader().hide()
@@ -260,18 +298,24 @@ class MainWindow(QMainWindow):
         self.album_grid.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.album_grid.setMovement(QListWidget.Movement.Static)
         self.album_grid.setSpacing(10)
-        self.album_grid.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.album_grid.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.album_grid.setUniformItemSizes(True)
-        self.album_grid.setItemDelegate(AlbumCardDelegate(self._request_artwork, self.album_grid))
+        self.album_grid.setItemDelegate(
+            AlbumCardDelegate(self._request_artwork, self.album_grid)
+        )
         self.album_grid.itemDoubleClicked.connect(self._open_album)
         self.album_detail_stack.addWidget(self.album_grid)
         self.album_detail_page = QWidget()
         album_detail_row = QHBoxLayout(self.album_detail_page)
         album_detail_row.setContentsMargins(8, 8, 8, 8)
         detail_left = QVBoxLayout()
-        back_button = button("返回专辑", "skip-back")
-        back_button.clicked.connect(lambda: self.album_detail_stack.setCurrentWidget(self.album_grid))
-        detail_left.addWidget(back_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.back_button = button("Back to albums", "skip-back")
+        self.back_button.clicked.connect(
+            lambda: self.album_detail_stack.setCurrentWidget(self.album_grid)
+        )
+        detail_left.addWidget(self.back_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.album_detail_cover = QLabel()
         self.album_detail_cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.album_detail_cover.setFixedSize(240, 240)
@@ -288,34 +332,42 @@ class MainWindow(QMainWindow):
         detail_left.addStretch()
         album_detail_row.addLayout(detail_left, 0)
         self.album_track_table = QTableWidget(0, 4)
-        self.album_track_table.setHorizontalHeaderLabels(["曲", "标题", "艺人", "时长"])
-        self.album_track_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.album_track_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.album_track_table.setHorizontalHeaderLabels(
+            ["Track", "Title", "Artist", "Duration"]
+        )
+        self.album_track_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.album_track_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
         self.album_track_table.setAlternatingRowColors(True)
         self.album_track_table.setShowGrid(False)
         self.album_track_table.verticalHeader().hide()
-        self.album_track_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.album_track_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
         album_detail_row.addWidget(self.album_track_table, 1)
         self.album_detail_stack.addWidget(self.album_detail_page)
         album_layout.addWidget(self.album_detail_stack)
         self.library_stack.addWidget(album_page)
         library_layout.addWidget(self.library_stack, 1)
-        self.tabs.addTab(self.library_page, "iPod 曲库")
+        self.tabs.addTab(self.library_page, "iPod Library")
 
         self.import_page = QWidget()
         import_layout = QVBoxLayout(self.import_page)
         toolbar = QHBoxLayout()
-        self.files_button = button("添加文件", "plus")
+        self.files_button = button("Add files", "plus")
         self.files_button.clicked.connect(self._choose_files)
-        self.folder_button = button("添加文件夹", "folder")
+        self.folder_button = button("Add folder", "folder")
         self.folder_button.clicked.connect(self._choose_folder)
-        self.remove_button = tool("移出队列", "minus")
+        self.remove_button = tool("Remove from queue", "minus")
         self.remove_button.clicked.connect(self._remove)
         toolbar.addWidget(self.files_button)
         toolbar.addWidget(self.folder_button)
         toolbar.addWidget(self.remove_button)
         toolbar.addStretch()
-        self.count_label = QLabel("0 首")
+        self.count_label = QLabel("0 songs")
         self.count_label.setObjectName("muted")
         toolbar.addWidget(self.count_label)
         import_layout.addLayout(toolbar)
@@ -323,7 +375,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ["", "标题", "艺人", "专辑", "专辑艺人", "碟", "曲", "状态"]
+            ["", "Title", "Artist", "Album", "Album artist", "Disc", "Track", "Status"]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -353,15 +405,15 @@ class MainWindow(QMainWindow):
         self.cover.setObjectName("cover")
         detail_layout.addWidget(self.cover)
         cover_actions = QHBoxLayout()
-        self.cover_button = button("选择封面", "photo")
+        self.cover_button = button("Choose cover", "photo")
         self.cover_button.clicked.connect(self._choose_cover)
         cover_actions.addWidget(self.cover_button)
-        self.clear_cover_button = tool("移除封面", "x")
+        self.clear_cover_button = tool("Remove cover", "x")
         self.clear_cover_button.clicked.connect(self._clear_cover)
         cover_actions.addWidget(self.clear_cover_button)
         cover_actions.addStretch()
         detail_layout.addLayout(cover_actions)
-        self.track_title = QLabel("未选择音乐")
+        self.track_title = QLabel("No track selected")
         self.track_title.setWordWrap(True)
         self.track_title.setFont(QFont("", 14, QFont.Weight.DemiBold))
         detail_layout.addWidget(self.track_title)
@@ -384,7 +436,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 1)
         splitter.setSizes([850, 230])
         import_layout.addWidget(splitter, 1)
-        self.tabs.addTab(self.import_page, "待导入")
+        self.tabs.addTab(self.import_page, "To Import")
         layout.addWidget(self.tabs, 1)
 
         self.progress = QProgressBar()
@@ -394,17 +446,17 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         layout.addWidget(self.progress)
         footer = QHBoxLayout()
-        self.status = QLabel("就绪")
+        self.status = QLabel("Ready")
         self.status.setWordWrap(True)
         self.status.setMinimumHeight(40)
         footer.addWidget(self.status, 1)
-        self.restore_button = button("撤销上次导入", "skip-back")
+        self.restore_button = button("Restore last import", "skip-back")
         self.restore_button.clicked.connect(self._restore)
         footer.addWidget(self.restore_button)
-        self.cancel_button = button("取消", "x")
+        self.cancel_button = button("Cancel", "x")
         self.cancel_button.clicked.connect(self._cancel)
         footer.addWidget(self.cancel_button)
-        self.import_button = button("导入所选", "music")
+        self.import_button = button("Import selected", "music")
         self.import_button.setObjectName("primary")
         self.import_button.clicked.connect(self._commit)
         footer.addWidget(self.import_button)
@@ -431,23 +483,135 @@ class MainWindow(QMainWindow):
             QMenu { background: white; }
         """)
         self._show_cover(None)
+        self._set_status("Ready")
+        self._sync_language_actions()
+        self._retranslate_ui()
 
     def _submit(self, command: str, payload: object = None) -> None:
         if self._busy or self.worker is None:
             return
         self.worker.cancelled.clear()
         self.set_busy(True)
-        self.status.setText(
+        self._current_progress = None
+        self._set_status(
             {
-                "discover": "正在查找设备",
-                "select": "正在读取曲库",
-                "preview": "正在检查音乐",
-                "commit": "正在准备导入",
-                "restore": "正在恢复上次曲库",
-                "eject": "正在弹出设备",
-            }.get(command, "正在处理")
+                "discover": "Finding devices",
+                "select": "Reading library",
+                "preview": "Inspecting music",
+                "commit": "Preparing import",
+                "restore": "Restoring previous library",
+                "eject": "Ejecting device",
+            }.get(command, "Working")
         )
         self.request.emit(command, payload)
+
+    def _set_status(self, template: str, **parameters: str) -> None:
+        self._status_message = source_text(template, **parameters)
+        self.status.setText(render_text(self._status_message))
+
+    def _language_changed(self, _language: str) -> None:
+        self._sync_language_actions()
+        self._retranslate_ui()
+
+    def _sync_language_actions(self) -> None:
+        for language, action in self.language_actions.items():
+            action.setChecked(
+                self._language_manager.follows_system
+                if language == SYSTEM_LANGUAGE
+                else not self._language_manager.follows_system
+                and language == self._language_manager.language
+            )
+
+    def _retranslate_ui(self) -> None:
+        self.setWindowTitle(tr("Classic Drop"))
+        self.heading_title.setText(tr("Classic Drop"))
+        self.settings_button.setToolTip(tr("More"))
+        self.settings_button.setAccessibleName(tr("More"))
+        self.backups_action.setText(tr("Show backups and logs"))
+        self.about_action.setText(tr("About Classic Drop"))
+        self.settings_button.setToolTip(tr("Settings"))
+        self.settings_button.setAccessibleName(tr("Settings"))
+        self.settings_menu.setTitle(tr("Settings"))
+        self.general_menu.setTitle(tr("General"))
+        self.language_menu.setTitle(tr("Language"))
+        self.language_actions[SYSTEM_LANGUAGE].setText(tr("Follow system"))
+        if self.devices.count():
+            self.devices.setItemText(0, tr(self._device_placeholder))
+        for widget, label in (
+            (self.refresh_button, "Refresh devices"),
+            (self.eject_button, "Safely eject"),
+            (self.remove_button, "Remove from queue"),
+            (self.clear_cover_button, "Remove cover"),
+        ):
+            widget.setToolTip(tr(label))
+            widget.setAccessibleName(tr(label))
+        self._update_device_info()
+        self.library_search.setPlaceholderText(tr("Search title, artist, or album"))
+        self.list_mode_button.setText(tr("List"))
+        self.album_mode_button.setText(tr("Albums"))
+        library_headers = [
+            "Title",
+            "Artist",
+            "Album",
+            "Album artist",
+            "Disc",
+            "Track",
+            "Duration",
+        ]
+        self.library_table.setHorizontalHeaderLabels(
+            [tr(header) for header in library_headers]
+        )
+        self.back_button.setText(tr("Back to albums"))
+        self.album_track_table.setHorizontalHeaderLabels(
+            [tr(header) for header in ("Track", "Title", "Artist", "Duration")]
+        )
+        self.tabs.setTabText(self.tabs.indexOf(self.library_page), tr("iPod Library"))
+        self.files_button.setText(tr("Add files"))
+        self.folder_button.setText(tr("Add folder"))
+        self.cover_button.setText(tr("Choose cover"))
+        self.restore_button.setText(tr("Restore last import"))
+        self.cancel_button.setText(tr("Cancel"))
+        self.tabs.setTabText(self.tabs.indexOf(self.import_page), tr("To Import"))
+        self.table.setHorizontalHeaderLabels(
+            [
+                "",
+                tr("Title"),
+                tr("Artist"),
+                tr("Album"),
+                tr("Album artist"),
+                tr("Disc"),
+                tr("Track"),
+                tr("Status"),
+            ]
+        )
+        self._queue_changed()
+        for row, entry in enumerate(self._entries):
+            item = self.table.item(row, 7)
+            if item is not None:
+                label = (
+                    "Import after conversion"
+                    if entry.status == "new" and entry.mode == "convert"
+                    else STATUS[entry.status]
+                )
+                item.setText(tr(label))
+                item.setToolTip(render_text(entry.detail) or entry.path.as_posix())
+        self.library_count.setText(song_count(len(self._library_tracks)))
+        if self._active is not None:
+            self._update_device_info()
+        if self._open_album_summary is not None:
+            self._update_album_detail(self._open_album_summary)
+        self._selection_changed()
+        self.album_grid.viewport().update()
+        self.status.setText(render_text(self._status_message))
+
+    def _update_album_detail(self, album: AlbumSummary) -> None:
+        self.album_detail_title.setText(album.title or tr("Unknown album"))
+        meta = album.artist or tr("Unknown artist")
+        if album.year:
+            meta += f"  ·  {album.year}"
+        duration = f"{album.duration_ms // 60000}:{album.duration_ms // 1000 % 60:02d}"
+        meta += f"\n{song_count(album.track_count)}  ·  {duration}"
+        self.album_detail_meta.setText(meta)
 
     def refresh(self) -> None:
         self._submit("discover")
@@ -517,7 +681,9 @@ class MainWindow(QMainWindow):
                 STATUS[entry.status],
             ]
             if entry.status == "new" and entry.mode == "convert":
-                values[-1] = "转换后导入"
+                values[-1] = tr("Import after conversion")
+            else:
+                values[-1] = tr(STATUS[entry.status])
             for col, text in enumerate(values, 1):
                 item = QTableWidgetItem(text)
                 if col == 7 or entry.status == "error":
@@ -545,7 +711,9 @@ class MainWindow(QMainWindow):
             None,
         )
         previous_device_id = getattr(self, "_library_device_id", None)
-        library_changed = tracks != self._library_tracks or device_id != previous_device_id
+        library_changed = (
+            tracks != self._library_tracks or device_id != previous_device_id
+        )
         if library_changed:
             self._album_artwork.clear()
             self._artwork_requests.clear()
@@ -567,11 +735,9 @@ class MainWindow(QMainWindow):
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setFlags(
-                    item.flags() & ~Qt.ItemFlag.ItemIsEditable
-                )
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.library_table.setItem(row, column, item)
-        self.library_count.setText(f"{len(tracks):,} 首")
+        self.library_count.setText(song_count(len(tracks)))
         if library_changed:
             self._albums = group_albums(tracks)
             self._update_album_grid()
@@ -601,12 +767,7 @@ class MainWindow(QMainWindow):
         if not isinstance(album, AlbumSummary):
             return
         self._open_album_summary = album
-        self.album_detail_title.setText(album.title or "未知专辑")
-        meta = album.artist or "未知艺人"
-        if album.year:
-            meta += f"  ·  {album.year}"
-        meta += f"\n{album.track_count} 首  ·  {album.duration_ms // 60000}:{album.duration_ms // 1000 % 60:02d}"
-        self.album_detail_meta.setText(meta)
+        self._update_album_detail(album)
         pixmap = self._album_artwork.get(album.artwork_id)
         if pixmap is None:
             self.album_detail_cover.setPixmap(
@@ -615,7 +776,12 @@ class MainWindow(QMainWindow):
             self._request_artwork(album.artwork_id)
         else:
             self.album_detail_cover.setPixmap(
-                pixmap.scaled(230, 230, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                pixmap.scaled(
+                    230,
+                    230,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
         self.album_track_table.setRowCount(len(album.tracks))
         for row, track in enumerate(album.tracks):
@@ -630,7 +796,11 @@ class MainWindow(QMainWindow):
         self.album_detail_stack.setCurrentWidget(self.album_detail_page)
 
     def _request_artwork(self, artwork_id: int) -> None:
-        if artwork_id <= 0 or artwork_id in self._artwork_requests or self.worker is None:
+        if (
+            artwork_id <= 0
+            or artwork_id in self._artwork_requests
+            or self.worker is None
+        ):
             return
         self._artwork_requests.add(artwork_id)
         self.request.emit("artwork", artwork_id)
@@ -650,7 +820,10 @@ class MainWindow(QMainWindow):
         for row in range(self.album_grid.count()):
             item = self.album_grid.item(row)
             album = item.data(ALBUM_ROLE)
-            if isinstance(album, AlbumSummary) and album.artwork_id == artwork.artwork_id:
+            if (
+                isinstance(album, AlbumSummary)
+                and album.artwork_id == artwork.artwork_id
+            ):
                 item.setData(ARTWORK_ROLE, pixmap)
         if (
             self.album_detail_stack.currentWidget() is self.album_detail_page
@@ -680,7 +853,11 @@ class MainWindow(QMainWindow):
                     album.title,
                     album.artist,
                     str(album.year),
-                    *(value for track in album.tracks for value in (track.title, track.artist)),
+                    *(
+                        value
+                        for track in album.tracks
+                        for value in (track.title, track.artist)
+                    ),
                 )
             ).casefold()
             self.album_grid.item(row).setHidden(bool(query and query not in haystack))
@@ -702,8 +879,14 @@ class MainWindow(QMainWindow):
 
     def _queue_changed(self) -> None:
         count = self._selected_count()
-        self.count_label.setText(f"{count} / {len(self._entries)} 首")
-        self.import_button.setText(f"导入 {count} 首" if count else "导入所选")
+        self.count_label.setText(
+            f"{song_count(count)} / {song_count(len(self._entries))}"
+        )
+        self.import_button.setText(
+            tr("Import {count}").format(count=song_count(count))
+            if count
+            else tr("Import selected")
+        )
         self.import_button.setEnabled(
             self._active is not None and count > 0 and not self._busy
         )
@@ -737,7 +920,7 @@ class MainWindow(QMainWindow):
         self.clear_cover_button.setEnabled(selected and not self._busy)
         if row < 0 or row >= len(self._entries):
             self._show_cover(None)
-            self.track_title.setText("未选择音乐")
+            self.track_title.setText(tr("No track selected"))
             self.track_details.clear()
             self.source_label.clear()
             return
@@ -746,7 +929,13 @@ class MainWindow(QMainWindow):
         self.track_title.setText(entry.title or entry.path.stem)
         seconds = entry.length_ms // 1000
         self.track_details.setText(
-            f"{entry.artist}\n{entry.album}\n\n{seconds // 60}:{seconds % 60:02d}  ·  {readable_size(entry.size_bytes)}\n{STATUS[entry.status]}"
+            tr("{artist}\n{album}\n\n{duration}  ·  {size}\n{status}").format(
+                artist=entry.artist,
+                album=entry.album,
+                duration=f"{seconds // 60}:{seconds % 60:02d}",
+                size=readable_size(entry.size_bytes),
+                status=tr(STATUS[entry.status]),
+            )
         )
         self.source_label.setText(str(entry.path))
         self.source_label.setToolTip(entry.detail or str(entry.path))
@@ -754,15 +943,19 @@ class MainWindow(QMainWindow):
     def _choose_files(self) -> None:
         paths, _filter = QFileDialog.getOpenFileNames(
             self,
-            "选择音乐",
+            tr("Select music"),
             "",
-            "音乐 (*.mp3 *.m4a *.flac *.wav *.aif *.aiff *.aac *.ogg *.opus *.wma *.ape *.wv);;所有文件 (*)",
+            tr(
+                "Music (*.mp3 *.m4a *.flac *.wav *.aif *.aiff *.aac *.ogg *.opus *.wma *.ape *.wv);;All files (*)"
+            ),
         )
         if paths:
             self._add_paths(tuple(Path(p) for p in paths))
 
     def _choose_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "选择专辑或音乐文件夹")
+        path = QFileDialog.getExistingDirectory(
+            self, tr("Select an album or music folder")
+        )
         if path:
             self._add_paths((Path(path),))
 
@@ -781,7 +974,10 @@ class MainWindow(QMainWindow):
 
     def _choose_cover(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, "选择专辑封面", "", "图片 (*.jpg *.jpeg *.png *.webp)"
+            self,
+            tr("Select album artwork"),
+            "",
+            tr("Images (*.jpg *.jpeg *.png *.webp)"),
         )
         if path:
             self._cover_tokens = {
@@ -803,12 +999,16 @@ class MainWindow(QMainWindow):
         try:
             self._submit("commit", self.edited_entries())
         except ValueError as error:
-            QMessageBox.warning(self, "曲号无效", str(error))
+            QMessageBox.warning(self, tr("Invalid track number"), str(error))
 
     def _restore(self) -> None:
         if (
             QMessageBox.question(
-                self, "撤销上次导入", "恢复上次导入前的曲库，并移除该次导入的音乐？"
+                self,
+                tr("Restore last import"),
+                tr(
+                    "Restore the library to its state before the last import and remove tracks added by it?"
+                ),
             )
             == QMessageBox.StandardButton.Yes
         ):
@@ -817,7 +1017,7 @@ class MainWindow(QMainWindow):
     def _cancel(self) -> None:
         if self.worker:
             self.worker.cancelled.set()
-        self.status.setText("正在取消，等待当前步骤结束")
+        self._set_status("Canceling; waiting for the current step to finish")
         self.cancel_button.setEnabled(False)
 
     def _succeeded(self, command: str, reply: Reply) -> None:
@@ -827,6 +1027,7 @@ class MainWindow(QMainWindow):
         if command == "artwork":
             self._show_album_artwork(cast("ArtworkImage | None", reply.value))
             return
+        self._current_progress = None
         previous_active = self._active
         self._active, self._can_restore = reply.active, reply.can_restore
         self.set_busy(False)
@@ -834,9 +1035,10 @@ class MainWindow(QMainWindow):
             candidates = cast("tuple[DeviceCandidate, ...]", reply.value)
             self.devices.blockSignals(True)
             self.devices.clear()
-            self.devices.addItem(
-                "选择 iPod Classic" if candidates else "未连接 iPod Classic", None
+            self._device_placeholder = (
+                "Choose iPod Classic" if candidates else "No iPod Classic connected"
             )
+            self.devices.addItem(tr(self._device_placeholder), None)
             for candidate in candidates:
                 self.devices.addItem(
                     f"{candidate.display_name} · {candidate.profile_name}", candidate.id
@@ -851,7 +1053,7 @@ class MainWindow(QMainWindow):
                         break
             if self._active is None:
                 self._update_library_table()
-            self.status.setText(f"找到 {len(candidates)} 台设备")
+            self._set_status("Found {count} devices", count=str(len(candidates)))
         elif command == "select":
             same_device = bool(
                 previous_active
@@ -863,7 +1065,7 @@ class MainWindow(QMainWindow):
                 self.show_entries(())
             self._update_library_table()
             self.tabs.setCurrentWidget(self.library_page)
-            self.status.setText("曲库已读取")
+            self._set_status("Library loaded")
         elif command == "preview":
             old = {entry.path: entry for entry in self.edited_entries()}
             incoming = tuple(cast("tuple[PreviewEntry, ...]", reply.value))
@@ -885,8 +1087,10 @@ class MainWindow(QMainWindow):
             )
             self.show_entries(merged)
             self.tabs.setCurrentWidget(self.import_page)
-            self.status.setText(
-                "预览就绪" if self._entries else "所选位置没有支持的音乐文件"
+            self._set_status(
+                "Preview ready"
+                if self._entries
+                else "No supported music files in the selected locations"
             )
         elif command == "cover":
             artwork = cast("ArtworkPixels", reply.value)
@@ -896,51 +1100,61 @@ class MainWindow(QMainWindow):
                     for e in self.edited_entries()
                 )
             )
-            self.status.setText("封面已更新")
+            self._set_status("Cover updated")
         elif command == "commit":
             result = cast("ImportResult", reply.value)
             self._paths = ()
             self.show_entries(())
             self._update_library_table()
-            self.status.setText(f"已导入 {result.added} 首")
+            self._set_status("Imported {count}", count=song_count(result.added))
             if result.warnings:
                 QMessageBox.warning(
-                    self, "导入完成，需留意", "\n".join(result.warnings)
+                    self,
+                    tr("Import completed with warnings"),
+                    "\n".join(result.warnings),
                 )
         elif command == "restore":
             self._paths = ()
             self.show_entries(())
             self._update_library_table()
-            self.status.setText("已恢复上次导入前的曲库")
+            self._set_status("Restore complete")
         elif command == "eject":
             self._paths = ()
             self.show_entries(())
             self._update_library_table()
             self.devices.blockSignals(True)
             self.devices.clear()
-            self.devices.addItem("设备已弹出", None)
+            self._device_placeholder = "Device ejected"
+            self.devices.addItem(tr(self._device_placeholder), None)
             self.devices.blockSignals(False)
-            self.status.setText("可以断开 iPod")
+            self._set_status("You can disconnect the iPod")
         self._update_device_info()
         self.set_busy(self._busy)
 
-    def _failed(self, command: str, message: str, reply: Reply) -> None:
+    def _failed(self, command: str, message: object, reply: Reply) -> None:
         if self._closing:
             self.request.emit("close", None)
             return
         if command == "artwork":
             return
+        display_message = (
+            render_text(message) if isinstance(message, str) else str(message)
+        )
         self._active, self._can_restore = reply.active, reply.can_restore
         self._update_library_table()
         self.set_busy(False)
-        self.status.setText("操作已取消" if "取消" in message else "操作未完成")
+        canceled = (
+            isinstance(message, SourceText)
+            and message.source == "Operation canceled"
+        ) or "cancel" in display_message.casefold() or "取消" in display_message
+        self._set_status("Operation canceled" if canceled else "Operation incomplete")
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("Classic Drop")
+        dialog.setWindowTitle(tr("Classic Drop"))
         dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(message[:400])
-        if len(message) > 400:
-            dialog.setDetailedText(message)
-        if "取消" not in message:
+        dialog.setText(display_message[:400])
+        if len(display_message) > 400:
+            dialog.setDetailedText(display_message)
+        if not canceled:
             dialog.exec()
         self._update_device_info()
 
@@ -948,25 +1162,31 @@ class MainWindow(QMainWindow):
         if self._active:
             active = self._active
             self.device_info.setText(
-                f"{active.profile.display_name}  ·  {active.profile.model_number}  ·  {len(active.library.tracks):,} 首  ·  可用 {readable_size(active.candidate.available_bytes)}"
+                tr("{model}  ·  {number}  ·  {count}  ·  {size} available").format(
+                    model=active.profile.display_name,
+                    number=active.profile.model_number,
+                    count=song_count(len(active.library.tracks)),
+                    size=readable_size(active.candidate.available_bytes),
+                )
             )
         else:
-            self.device_info.setText("未连接设备")
+            self.device_info.setText(tr("No device connected"))
 
     def _progress(self, progress: WriteProgress) -> None:
         if self._closing:
             return
+        self._current_progress = progress
         phase = progress.phase
-        label = "正在写入并验证"
+        message = "Writing and verifying: {item}"
         if phase == "inspect":
-            label = "正在检查音乐"
+            message = "Inspecting music: {item}"
         elif phase == "history":
-            label = "正在保留播放历史"
+            message = "Keeping playback history: {item}"
         elif phase.startswith("database."):
-            label = "正在准备曲库和封面"
+            message = "Preparing library and artwork: {item}"
         elif "recover" in phase:
-            label = "正在恢复曲库"
-        self.status.setText(f"{label}  {progress.current_item}")
+            message = "Restoring library: {item}"
+        self._set_status(message, item=progress.current_item)
         if progress.total and progress.completed is not None:
             self.progress.setRange(0, progress.total)
             self.progress.setValue(progress.completed)
@@ -984,8 +1204,10 @@ class MainWindow(QMainWindow):
     def _about(self) -> None:
         QMessageBox.about(
             self,
-            "关于 Classic Drop",
-            "Classic Drop 0.1.0\n\niPod Classic 音乐导入工具\n基于 iOpenPod 2.0.15\nGPL-3.0-or-later\n\n源码与第三方许可见 CLASSIC_DROP.md。",
+            tr("About Classic Drop"),
+            tr(
+                "Classic Drop 0.1.0\n\niPod Classic music importer\nBased on iOpenPod 2.0.15\nGPL-3.0-or-later\n\nSee CLASSIC_DROP.md for source and third-party license notices."
+            ),
         )
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:

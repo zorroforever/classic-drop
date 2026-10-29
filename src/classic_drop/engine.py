@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from classic_drop.history import ImportHistory
 from classic_drop.media import PreparedSong, collect_audio, prepare_song
+from iOpenPod.app.display_text import exception_text, source_text
 from iOpenPod.app.library_workspace import LibraryWorkspace
 from iOpenPod.app.library_write import LibraryPreparationRequest, WriteProgress
 from iOpenPod.app.media.importing import relocate_song
@@ -91,7 +92,7 @@ class ClassicDropEngine:
     def active(self) -> ActiveIPod:
         active = self.coordinator.active_ipod
         if active is None:
-            raise ValueError("请先连接并选择 iPod Classic")
+            raise ValueError(source_text("Select an iPod Classic first"))
         return active
 
     def discover(self) -> tuple[DeviceCandidate, ...]:
@@ -108,12 +109,17 @@ class ClassicDropEngine:
             or candidate.profile is None
             or candidate.profile.family != "iPod Classic"
         ):
-            raise ValueError("仅支持 Apple 原厂固件的 iPod Classic")
+            raise ValueError(source_text("Only stock-firmware iPod Classic is supported"))
         if candidate.readiness not in (
             DeviceReadiness.READY,
             DeviceReadiness.SYNC_RECOVERY_REQUIRED,
         ):
-            raise ValueError(f"设备曲库尚不可用：{candidate.readiness.value}")
+            raise ValueError(
+                source_text(
+                    "Device library is not available: {state}",
+                    state=candidate.readiness.value,
+                )
+            )
         self.discard()
         self.pending_recovery = None
         try:
@@ -131,18 +137,20 @@ class ClassicDropEngine:
             for i in active.candidate.issues
         ):
             self.coordinator.close()
-            raise ValueError("设备封面数据库无法读取，请先恢复曲库备份")
+            raise ValueError(
+                source_text("Device artwork database is unreadable; restore a library backup first")
+            )
         return active
 
     def _identity(self) -> str:
         volume = self.coordinator.active_volume_id
         if volume is None:
-            raise ValueError("设备已断开")
+            raise ValueError(source_text("The device is disconnected"))
         return volume.value
 
     def _checkpoint(self, cancelled: Event) -> None:
         if cancelled.is_set():
-            raise OperationCancelledError("操作已取消")
+            raise OperationCancelledError(source_text("Operation canceled"))
 
     def preview(
         self, paths: tuple[Path, ...], cancelled: Event
@@ -171,12 +179,14 @@ class ClassicDropEngine:
                     seen.add(self._songs[entry.token].original.sha256)
                 continue
             self.progress(
-                WriteProgress("inspect", "正在检查音乐", index, len(sources), path.name)
+                WriteProgress("inspect", "Inspecting music", index, len(sources), path.name)
             )
             token = uuid4().hex
             try:
                 if path.resolve().is_relative_to(device_root):
-                    raise ValueError("请从电脑选择音乐，不能把 iPod 自身作为导入来源")
+                    raise ValueError(
+                        source_text("Choose music from this Mac, not from the iPod itself")
+                    )
                 prepared = prepare_song(
                     path, active.profile, self._resources, checkpoint
                 )
@@ -221,7 +231,11 @@ class ClassicDropEngine:
             except Exception as error:
                 entries.append(
                     PreviewEntry(
-                        token, path, selected=False, status="error", detail=str(error)
+                        token,
+                        path,
+                        selected=False,
+                        status="error",
+                        detail=exception_text(error),
                     )
                 )
         checkpoint()
@@ -237,32 +251,38 @@ class ClassicDropEngine:
         checkpoint()
         active = self.active
         if active is not self._preview_active:
-            raise ValueError("设备或曲库已改变，请重新预览")
+            raise ValueError(source_text("The device or library changed; preview again"))
         selected = tuple(e for e in entries if e.selected)
         if not selected:
-            raise ValueError("请至少选择一首待导入歌曲")
+            raise ValueError(source_text("Select at least one song to import"))
         prepared = []
         for entry in selected:
             checkpoint()
             item = self._songs.get(entry.token)
             if item is None or entry.path != item.path:
-                raise ValueError("预览已过期，请重新选择文件")
+                raise ValueError(source_text("The preview expired; select the files again"))
             if (
                 not entry.title.strip()
                 or min(entry.track_number, entry.disc_number) < 0
             ):
-                raise ValueError("标题不能为空，曲号和碟号不能为负数")
+                raise ValueError(
+                    source_text("A title is required and track and disc numbers cannot be negative")
+                )
             with capture_host_file(
                 HostPath(item.path), checkpoint=checkpoint
             ) as source:
                 if source.fingerprint.sha256 != item.original.sha256:
-                    raise ValueError(f"源文件已改变，请重新预览：{item.path.name}")
+                    raise ValueError(
+                        source_text(
+                            "File changed; preview it again: {name}", name=item.path.name
+                        )
+                    )
             prepared.append((entry, item))
         # Validate the retained database before the explicit commit's history
         # reconciliation. Initial selection and preview never reconcile it.
         with self.coordinator.sync_session(active):
             checkpoint()
-        self.progress(WriteProgress("history", "正在保留播放历史"))
+        self.progress(WriteProgress("history", "Keeping playback history"))
         active = self.coordinator.select_device(
             active.candidate.id,
             reconcile_metadata=False,
@@ -307,15 +327,20 @@ class ClassicDropEngine:
         )
         if review.result.prepared is None:
             raise ValueError(
-                "\n".join(
-                    f"{i.code}: {i.message} {i.detail}" for i in review.result.issues
+                source_text(
+                    "{issues}",
+                    issues="\n".join(
+                        f"{i.code}: {i.message} {i.detail}" for i in review.result.issues
+                    ),
                 )
             )
         retained_paths = {t.metadata.location for t in active.library.tracks}
         if any(
             f.action != "write" or f.path in retained_paths for f in review.file_changes
         ):
-            raise ValueError("追加导入不得删除文件或覆盖已有音乐")
+            raise ValueError(
+                source_text("Append-only import cannot delete or overwrite retained music")
+            )
         checkpoint()
         result = self.coordinator.save_library(
             review, active, self.progress, cancelled, retain_recovery=True
@@ -325,7 +350,13 @@ class ClassicDropEngine:
             detail = "\n".join(
                 f"{i.code}: {i.message} {i.detail}" for i in result.issues
             )
-            raise ValueError(f"{detail}\n恢复记录：{result.recovery_path}")
+            raise ValueError(
+                source_text(
+                    "{detail}\nRecovery record: {recovery}",
+                    detail=detail,
+                    recovery=str(result.recovery_path),
+                )
+            )
         new_tracks = result.active.library.tracks[len(active.library.tracks) :]
         warnings = [f"{i.message} {i.detail}" for i in result.issues]
         try:
@@ -339,7 +370,11 @@ class ClassicDropEngine:
             )
         except (OSError, ValueError, sqlite3.Error) as error:
             warnings.append(
-                f"音乐已写入，本地记录未保存：{error}；恢复记录：{result.recovery_path}"
+                source_text(
+                    "Music was written, but the local receipt was not saved: {error}; recovery record: {recovery}",
+                    error=str(error),
+                    recovery=result.recovery_path,
+                )
             )
         self.discard()
         return ImportResult(len(prepared), result.recovery_path, tuple(warnings))
@@ -354,7 +389,9 @@ class ClassicDropEngine:
         active, identity = self.active, self._identity()
         recovery = self.history.latest(identity)
         if not recovery:
-            raise ValueError("此设备没有可恢复的导入记录")
+            raise ValueError(
+                source_text("This device has no recoverable import record")
+            )
         self.discard()
         self.coordinator.recover_failed_sync(active, recovery, self.progress)
         self.history.restored(identity, recovery)

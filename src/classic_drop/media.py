@@ -14,6 +14,7 @@ import mutagen
 from PIL import Image, ImageOps
 
 from device_registry import DeviceProfile
+from iOpenPod.app.display_text import source_text
 from iOpenPod.app.export_tagging import ExportMediaTagger
 from iOpenPod.app.media.importing import ImportedSong, MusicImporter
 from iOpenPod.app.media.inspection import MediaInspectionError
@@ -82,16 +83,16 @@ def collect_audio(paths: tuple[Path, ...]) -> tuple[Path, ...]:
         elif path.is_file():
             add(path)
         else:
-            raise ValueError(f"文件不存在：{path}")
+            raise ValueError(source_text("File not found: {path}", path=str(path)))
     return tuple(found)
 
 
 def decode_cover(data: bytes) -> ArtworkPixels:
     if len(data) > 32 * 1024 * 1024:
-        raise ValueError("封面文件超过 32 MiB")
+        raise ValueError(source_text("Cover file exceeds 32 MiB"))
     with Image.open(io.BytesIO(data)) as image:
         if max(image.size) > 8192 or image.width * image.height > 32 * 1024 * 1024:
-            raise ValueError("封面尺寸过大")
+            raise ValueError(source_text("Cover dimensions are too large"))
         # Device thumbnails never need the original multi-megapixel raster.
         oriented = ImageOps.exif_transpose(image)
         oriented.thumbnail((1200, 1200))

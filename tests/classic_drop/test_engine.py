@@ -4,6 +4,7 @@ from threading import Event
 import pytest
 
 from classic_drop.engine import ClassicDropEngine, OperationCancelledError
+from iOpenPod.app.display_text import source_text
 from iPodDB.iTunesDB.writer.signature import verify_hash58
 from iPodDB.library import CoverFormat, CoverPixelFormat, IPodLibrary
 from tests.classic_drop.test_media import media_file
@@ -37,6 +38,21 @@ def test_selection_and_preview_do_not_write_the_device(connected, tmp_path):
         for p in device.root.rglob("*")
         if p.is_file()
     } == before
+
+
+def test_preview_preserves_translatable_error_template(connected, tmp_path, monkeypatch):
+    _device, engine = connected
+    source = media_file(tmp_path)
+
+    def fail_preparation(*_args, **_kwargs):
+        raise ValueError(source_text("File not found: {path}", path="missing.m4a"))
+
+    monkeypatch.setattr("classic_drop.engine.prepare_song", fail_preparation)
+
+    entry = engine.preview((source,), Event())[0]
+
+    assert entry.detail == "File not found: missing.m4a"
+    assert entry.detail.source == "File not found: {path}"
 
 
 def test_append_preserves_old_library_and_writes_signed_covers(connected, tmp_path):
@@ -111,7 +127,7 @@ def test_cancellation_leaves_original_library(connected, tmp_path):
     entries = engine.preview((media_file(tmp_path),), Event())
     cancelled = Event()
     cancelled.set()
-    with pytest.raises(OperationCancelledError, match="取消"):
+    with pytest.raises(OperationCancelledError, match=r"cancel|取消"):
         engine.commit(entries, cancelled)
     device.assert_original()
 

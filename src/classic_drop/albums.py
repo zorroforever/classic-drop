@@ -9,6 +9,7 @@ from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
+from classic_drop.i18n import song_count, tr
 from iOpenPod.GUI.presentation.icons import glyph_icon
 from iPodDB.library import Track
 
@@ -61,7 +62,11 @@ def group_albums(tracks: Iterable[Track]) -> tuple[AlbumSummary, ...]:
                 tracks=ordered,
             )
         )
-    return tuple(sorted(albums, key=lambda album: (album.title.casefold(), album.artist.casefold())))
+    return tuple(
+        sorted(
+            albums, key=lambda album: (album.title.casefold(), album.artist.casefold())
+        )
+    )
 
 
 class AlbumCardDelegate(QStyledItemDelegate):
@@ -72,9 +77,9 @@ class AlbumCardDelegate(QStyledItemDelegate):
     ) -> None:
         super().__init__(parent)
         self._request_artwork = request_artwork
-        self._placeholder = glyph_icon(
-            "album", 110, QColor("#899497")
-        ).pixmap(QSize(110, 110))
+        self._placeholder = glyph_icon("album", 110, QColor("#899497")).pixmap(
+            QSize(110, 110)
+        )
 
     def sizeHint(
         self,
@@ -126,7 +131,9 @@ class AlbumCardDelegate(QStyledItemDelegate):
             )
 
         painter.setPen(QColor("#24282a"))
-        title_rect = QRect(rect.x() + 9, artwork_rect.bottom() + 10, rect.width() - 18, 38)
+        title_rect = QRect(
+            rect.x() + 9, artwork_rect.bottom() + 10, rect.width() - 18, 38
+        )
         painter.drawText(
             title_rect,
             int(
@@ -134,13 +141,13 @@ class AlbumCardDelegate(QStyledItemDelegate):
                 | Qt.AlignmentFlag.AlignTop
                 | Qt.TextFlag.TextWordWrap
             ),
-            summary.title or "未知专辑",
+            summary.title or tr("Unknown album"),
         )
         painter.setPen(QColor("#697377"))
         detail = summary.artist
         if summary.year:
             detail = f"{detail}  ·  {summary.year}" if detail else str(summary.year)
-        detail += f"\n{summary.track_count} 首"
+        detail += f"\n{song_count(summary.track_count)}"
         painter.drawText(
             QRect(rect.x() + 9, title_rect.bottom() + 2, rect.width() - 18, 42),
             int(

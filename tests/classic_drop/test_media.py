@@ -3,11 +3,13 @@ import subprocess
 from contextlib import ExitStack
 from pathlib import Path
 
+import pytest
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4
 from PIL import Image
 
 from classic_drop.media import collect_audio, prepare_song
+from iOpenPod.app.display_text import SourceText
 from tests.iOpenPod.app.services.test_first_artwork_save import bare_device
 
 FIXTURES = Path(__file__).parents[1] / "fixtures/media"
@@ -29,6 +31,17 @@ def test_collect_audio_deduplicates_overlaps_and_ignores_symlinks(tmp_path):
     (album / "linked.mp3").symlink_to(song)
     (album / "loop").symlink_to(album, target_is_directory=True)
     assert collect_audio((album, song)) == (song,)
+
+
+def test_missing_input_preserves_a_translatable_path_template(tmp_path):
+    path = tmp_path / "缺失.m4a"
+
+    with pytest.raises(ValueError) as captured:
+        collect_audio((path,))
+
+    assert isinstance(captured.value.args[0], SourceText)
+    assert captured.value.args[0].source == "File not found: {path}"
+    assert captured.value.args[0].parameters == (("path", str(path.absolute())),)
 
 
 def test_compatible_file_is_unchanged_with_embedded_cover(tmp_path):
