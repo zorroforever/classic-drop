@@ -1429,6 +1429,7 @@ class DeviceCoordinator:
                         expected.database_name
                     ),
                     allow_unchanged=allow_unchanged,
+                    device_recovery=request.device_recovery,
                 )
                 if write is None:
                     # Changed reviews validate all captured files through their

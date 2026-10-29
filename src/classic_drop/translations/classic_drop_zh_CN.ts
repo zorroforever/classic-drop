@@ -34,9 +34,6 @@
     <message><source>Search title, artist, or album</source><translation>搜索标题、艺人或专辑</translation></message>
     <message><source>List</source><translation>列表</translation></message>
     <message><source>Albums</source><translation>专辑</translation></message>
-    <message><source>Title</source><translation>标题</translation></message>
-    <message><source>Artist</source><translation>艺人</translation></message>
-    <message><source>Album</source><translation>专辑</translation></message>
     <message><source>Album artist</source><translation>专辑艺人</translation></message>
     <message><source>Disc</source><translation>碟</translation></message>
     <message><source>Track</source><translation>曲</translation></message>
@@ -57,6 +54,48 @@
     <message><source>No track selected</source><translation>未选择音乐</translation></message>
     <message><source>Ready</source><translation>就绪</translation></message>
     <message><source>Restore last import</source><translation>撤销上次导入</translation></message>
+    <message><source>Restore last Library change</source><translation>恢复上次曲库变更</translation></message>
+    <message><source>Restore the iPod Library and music files to their state before the last Library change?</source><translation>将 iPod 曲库和音乐文件恢复到上次曲库变更之前的状态吗？</translation></message>
+    <message><source>Last Library change can be restored</source><translation>可以恢复上次曲库变更</translation></message>
+    <message><source>Restore the selected iPod Library and music files to their previous state.</source><translation>将所选 iPod 曲库和音乐文件恢复到之前的状态。</translation></message>
+    <message><source>Connect an iPod with a recoverable Library change.</source><translation>连接包含可恢复曲库变更的 iPod。</translation></message>
+    <message><source>Remove from iPod</source><translation>从 iPod 移除</translation></message>
+    <message><source>Review music removal</source><translation>复核音乐移除</translation></message>
+    <message><source>Remove {count} songs. {size} of unique media will be retained on the iPod for recovery.</source><translation>移除 {count} 首音乐。{size} 的独立音乐文件会保留在 iPod 上用于恢复。</translation></message>
+    <message><source>Affected playlists: {count}</source><translation>受影响的播放列表：{count}</translation></message>
+    <message><source>Select at least one song to delete</source><translation>请至少选择一首音乐再删除</translation></message>
+    <message><source>The Library changed; select the songs again</source><translation>曲库已变化，请重新选择音乐</translation></message>
+    <message><source>Only music Tracks can be removed here</source><translation>此处只能移除音乐曲目</translation></message>
+    <message><source>Restore the previous Library change before importing or deleting music</source><translation>导入或删除音乐前，请先恢复上次曲库变更</translation></message>
+    <message><source>The deletion review contains no changes</source><translation>删除复核中没有变更</translation></message>
+    <message><source>The Library could not confirm this deletion. Recovery record: {recovery}</source><translation>曲库无法确认此次删除。恢复记录：{recovery}</translation></message>
+    <message><source>Library restored</source><translation>曲库已恢复</translation></message>
+    <message><source>Removed {count} songs</source><translation>已移除 {count} 首音乐</translation></message>
+    <message><source>To Remove</source><translation>待移除</translation></message>
+    <message><source>Add selection to removal package</source><translation>将所选项加入移除清单</translation></message>
+    <message><source>Remove package from iPod</source><translation>从 iPod 移除清单中的音乐</translation></message>
+    <message><source>Title</source><translation>标题</translation></message>
+    <message><source>Artist</source><translation>艺人</translation></message>
+    <message><source>Album</source><translation>专辑</translation></message>
+    <message><source>Genre</source><translation>风格</translation></message>
+    <message><source>Year</source><translation>年份</translation></message>
+    <message><source>Playlist</source><translation>播放列表</translation></message>
+    <message><source>Any genre</source><translation>所有风格</translation></message>
+    <message><source>Any year</source><translation>所有年份</translation></message>
+    <message><source>Any Playlist</source><translation>所有播放列表</translation></message>
+    <message><source>Missing genre</source><translation>无风格</translation></message>
+    <message><source>Missing year</source><translation>无年份</translation></message>
+    <message><source>{count} matches</source><translation>匹配 {count} 首</translation></message>
+    <message><source>To remove: {count} songs</source><translation>待移除：{count} 首</translation></message>
+    <message><source>Add selected to package</source><translation>加入所选</translation></message>
+    <message><source>Add all matches</source><translation>加入全部匹配项</translation></message>
+    <message><source>Added by filter</source><translation>加入时的筛选条件</translation></message>
+    <message><source>Remove selected from package</source><translation>从清单移除所选项</translation></message>
+    <message><source>Clear package</source><translation>清空清单</translation></message>
+    <message><source>Add all matching music</source><translation>加入全部匹配音乐</translation></message>
+    <message><source>Add all {count} matching songs to the removal package?</source><translation>将匹配的全部 {count} 首音乐加入移除清单吗？</translation></message>
+    <message><source>The Library changed; rebuild the removal package</source><translation>曲库已变化，请重新建立移除清单</translation></message>
+    <message><source>Removal was committed, but the local recovery index could not be saved: {error}. Restore is available until Classic Drop closes.</source><translation>移除已提交，但本机恢复索引无法保存：{error}。关闭 Classic Drop 前仍可恢复。</translation></message>
     <message><source>Cancel</source><translation>取消</translation></message>
     <message><source>Import selected</source><translation>导入所选</translation></message>
     <message><source>Import {count}</source><translation>导入 {count}</translation></message>

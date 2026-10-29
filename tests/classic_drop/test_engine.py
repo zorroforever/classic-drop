@@ -199,6 +199,24 @@ def test_restore_last_import_recovers_previous_bytes(connected, tmp_path):
     assert result.recovery_path
 
 
+def test_successive_imports_remain_individually_recoverable(connected, tmp_path):
+    device, engine = connected
+    first_source = media_file(tmp_path, "chapters-cover.m4a")
+    second_source = media_file(tmp_path, "tone.m4a")
+    original = engine.active.library
+
+    engine.commit(engine.preview((first_source,), Event()), Event())
+    after_first = engine.active.library
+    engine.commit(engine.preview((second_source,), Event()), Event())
+
+    engine.restore_last(Event())
+    assert engine.active.library == after_first
+
+    engine.restore_last(Event())
+    assert engine.active.library == original
+    device.assert_original()
+
+
 def test_user_edits_apply_only_to_new_tracks(connected, tmp_path):
     _device, engine = connected
     before = engine.active.library.tracks

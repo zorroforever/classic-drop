@@ -47,7 +47,9 @@ class WorkspaceShell(QWidget):
         self.sidebar.setSpacing(3)
         self.sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sidebar.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.sidebar.addItems(["iPod Library", "To Import", "Recovery & History"])
+        self.sidebar.addItems(
+            ["iPod Library", "To Import", "Recovery & History", "To Remove"]
+        )
         sidebar_layout.addWidget(self.sidebar, 1)
         self.device_label = QLabel()
         self.device_label.setObjectName("muted")
@@ -93,6 +95,9 @@ class WorkspaceShell(QWidget):
         self.import_button.setObjectName("primary")
         self.import_button.setDefault(True)
         footer.addWidget(self.import_button)
+        self.delete_package_button = button("Remove package from iPod", "minus")
+        self.delete_package_button.setObjectName("primary")
+        footer.addWidget(self.delete_package_button)
         content_layout.addLayout(footer)
         layout.addWidget(content, 1)
 
@@ -142,7 +147,7 @@ class WorkspaceShell(QWidget):
         self.sidebar.setAccessibleName(tr("Workspaces"))
         self.device_label.setText(tr("Current iPod"))
         for row, source in enumerate(
-            ("iPod Library", "To Import", "Recovery & History")
+            ("iPod Library", "To Import", "Recovery & History", "To Remove")
         ):
             item = self.sidebar.item(row)
             item.setText(tr(source))
@@ -153,12 +158,14 @@ class WorkspaceShell(QWidget):
 
     def update_recovery(self, available: bool) -> None:
         self.recovery_title.setText(
-            tr("Last import can be restored")
+            tr("Last Library change can be restored")
             if available
             else tr("No recovery available")
         )
         self.recovery_detail.setText(
-            tr("Restore the selected iPod to its state before the last import.")
+            tr(
+                "Restore the selected iPod Library and music files to their previous state."
+            )
             if available
-            else tr("Connect an iPod with a recoverable import to restore its Library.")
+            else tr("Connect an iPod with a recoverable Library change.")
         )

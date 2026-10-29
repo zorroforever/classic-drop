@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QFont, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -23,12 +23,35 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from classic_drop.albums import AlbumCardDelegate
+from classic_drop.albums import CARD_SIZE, AlbumCardDelegate
 from classic_drop.presentation import button, empty_state
 from iPodDB.library import Track
 
 if TYPE_CHECKING:
     from classic_drop.window import MainWindow
+
+
+class AlbumGrid(QListWidget):
+    """Distribute fixed-width album cards evenly across the available row."""
+
+    LAYOUT_GUTTER = 20
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        self.update_columns()
+        super().resizeEvent(event)
+
+    def update_columns(self) -> None:
+        width = self.viewport().width()
+        visible = sum(not self.item(i).isHidden() for i in range(self.count()))
+        content_width = max(1, width - self.LAYOUT_GUTTER)
+        columns = max(
+            1,
+            min(max(1, visible), content_width // (CARD_SIZE.width() + 20)),
+        )
+        cell_width = max(CARD_SIZE.width() + 20, content_width // columns)
+        size = QSize(cell_width, CARD_SIZE.height() + 20)
+        if size != self.gridSize():
+            self.setGridSize(size)
 
 
 class LibraryCell(QTableWidgetItem):
@@ -54,6 +77,10 @@ class LibraryView(QWidget):
         self.library_count = QLabel("0 songs")
         self.library_count.setObjectName("muted")
         library_toolbar.addWidget(self.library_count)
+        self.delete_button = button("Add selection to removal package", "plus")
+        self.delete_button.clicked.connect(controller._add_library_selection_to_package)
+        self.delete_button.setEnabled(False)
+        library_toolbar.addWidget(self.delete_button)
         self.controls = QWidget()
         self.controls.setLayout(library_toolbar)
         library_toolbar.setContentsMargins(0, 0, 0, 0)
@@ -129,11 +156,15 @@ class LibraryView(QWidget):
         album_layout = QVBoxLayout(album_page)
         album_layout.setContentsMargins(0, 0, 0, 0)
         self.album_detail_stack = QStackedWidget()
-        self.album_grid = QListWidget()
+        self.album_grid = AlbumGrid()
         self.album_grid.setViewMode(QListWidget.ViewMode.IconMode)
         self.album_grid.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.album_grid.setMovement(QListWidget.Movement.Static)
-        self.album_grid.setSpacing(10)
+        self.album_grid.setSpacing(0)
+        self.album_grid.setViewportMargins(AlbumGrid.LAYOUT_GUTTER, 0, 0, 0)
+        self.album_grid.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.album_grid.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
@@ -173,6 +204,9 @@ class LibraryView(QWidget):
         )
         self.album_track_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.album_track_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
         )
         self.album_track_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers

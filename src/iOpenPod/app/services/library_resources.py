@@ -934,6 +934,7 @@ def transaction(
     *,
     primary_database: DevicePath = ITUNESDB,
     allow_unchanged: bool = False,
+    device_recovery: bool = False,
 ) -> StorageTransaction | None:
     before = {f.path: f.fingerprint for f in captured.files}
     writes: list[TransactionWrite] = list(captured.media_writes)
@@ -1031,7 +1032,8 @@ def transaction(
         captured.removals,
         tuple(f for f in captured.files if f.path not in changed),
         stage_one_at_a_time=bool(captured.media_writes),
-        host_recovery=session.supports_host_transaction_recovery,
+        host_recovery=session.supports_host_transaction_recovery
+        and not device_recovery,
     )
     session.validate_transaction(plan)
     return plan

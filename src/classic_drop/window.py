@@ -50,7 +50,7 @@ from classic_drop.albums import (
     AlbumSummary,
     group_albums,
 )
-from classic_drop.engine import ImportResult, PreviewEntry
+from classic_drop.engine import DeleteResult, ImportResult, PreviewEntry
 from classic_drop.i18n import (
     SYSTEM_LANGUAGE,
     get_language_manager,
@@ -61,6 +61,8 @@ from classic_drop.i18n import (
 from classic_drop.import_view import ImportView
 from classic_drop.library_view import LibraryCell, LibraryView
 from classic_drop.presentation import STYLE, tool
+from classic_drop.removal import removal_media_size
+from classic_drop.removal_view import RemovalView
 from classic_drop.shell import WorkspaceShell
 from classic_drop.worker import Reply, Worker
 from iOpenPod.app.display_text import SourceText, source_text
@@ -68,7 +70,7 @@ from iOpenPod.app.library_write import WriteProgress
 from iOpenPod.app.models.artwork import ArtworkImage
 from iOpenPod.app.models.device import ActiveIPod, DeviceCandidate
 from iOpenPod.GUI.presentation.icons import glyph_icon
-from iPodDB.library import ArtworkPixels, Track
+from iPodDB.library import ArtworkPixels, MediaKind, Track
 
 STATUS = {
     "new": "Queued",
@@ -146,6 +148,7 @@ class MainWindow(QMainWindow):
         self.shell = WorkspaceShell()
         self.setCentralWidget(self.shell)
         self.library_view = LibraryView(self)
+        self.removal_view = RemovalView(self)
         self.import_view = ImportView(self)
         self.library_page = self.library_view
         self.import_page = self.import_view
@@ -154,6 +157,7 @@ class MainWindow(QMainWindow):
         self.list_mode_button = self.library_view.list_mode_button
         self.album_mode_button = self.library_view.album_mode_button
         self.library_table = self.library_view.library_table
+        self.delete_button = self.library_view.delete_button
         self.library_stack = self.library_view.library_stack
         self.library_list_page = self.library_view.library_list_page
         self.library_album_page = self.library_view.library_album_page
@@ -195,6 +199,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.library_page)
         self.pages.addWidget(self.import_page)
         self.pages.addWidget(self.recovery_page)
+        self.pages.addWidget(self.removal_view)
         self.sidebar = self.shell.sidebar
         self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.pages.currentChanged.connect(self._workspace_changed)
@@ -271,8 +276,14 @@ class MainWindow(QMainWindow):
         self.cancel_button.clicked.connect(self._cancel)
         self.import_button = self.shell.import_button
         self.import_button.clicked.connect(self._commit)
+        self.delete_package_button = self.shell.delete_package_button
+        self.delete_package_button.clicked.connect(self._request_remove_tracks)
+        self.removal_view.packageChanged.connect(self._removal_package_changed)
         self.library_table.itemSelectionChanged.connect(self._library_selection_changed)
         self.album_grid.itemSelectionChanged.connect(self._library_selection_changed)
+        self.album_track_table.itemSelectionChanged.connect(
+            self._library_selection_changed
+        )
         self.library_table.model().layoutChanged.connect(
             lambda: self._filter_library(self.library_search.text())
         )
@@ -303,18 +314,25 @@ class MainWindow(QMainWindow):
         self.sidebar.setCurrentRow(index)
         self.sidebar.blockSignals(False)
         self.heading_title.setText(
-            tr(("iPod Library", "To Import", "Recovery & History")[index])
+            tr(("iPod Library", "To Import", "Recovery & History", "To Remove")[index])
         )
         self.library_controls_action.setVisible(index == 0)
-        self.inspector_button.setEnabled(index != 2)
-        self._set_inspector_visible(self.inspector_button.isChecked())
+        self.inspector_button.setEnabled(index in (0, 1))
+        self._set_inspector_visible(
+            self.inspector_button.isChecked() and index in (0, 1)
+        )
         if index < 2:
             self.inspector_stack.setCurrentIndex(index)
         self.import_button.setVisible(index == 1)
+        self.delete_button.setVisible(index == 0)
+        self.delete_package_button.setVisible(index == 3)
+        self.delete_package_button.setEnabled(
+            bool(self.removal_view.package_entries) and not self._busy
+        )
         self._find_action.setEnabled(index == 0)
 
     def _set_inspector_visible(self, visible: bool) -> None:
-        self.inspector_stack.setVisible(visible and self.pages.currentIndex() != 2)
+        self.inspector_stack.setVisible(visible and self.pages.currentIndex() in (0, 1))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -344,6 +362,11 @@ class MainWindow(QMainWindow):
                 self.library_inspector_title.setText(tr("No track selected"))
                 self.library_inspector_details.clear()
             self._update_library_inspector_cover()
+            self.delete_button.setEnabled(
+                bool(self._selected_library_track_ids())
+                and self._active is not None
+                and not self._busy
+            )
             return
         rows = [
             item.row()
@@ -365,6 +388,11 @@ class MainWindow(QMainWindow):
         self.library_inspector_title.setText(title)
         self.library_inspector_details.setText(details)
         self._update_library_inspector_cover()
+        self.delete_button.setEnabled(
+            bool(self._selected_library_track_ids())
+            and self._active is not None
+            and not self._busy
+        )
 
     def _update_library_inspector_cover(self) -> None:
         cover = self.library_view.inspector_cover
@@ -467,6 +495,7 @@ class MainWindow(QMainWindow):
             (self.eject_button, "Safely eject"),
             (self.remove_button, "Remove from queue"),
             (self.clear_cover_button, "Remove cover"),
+            (self.delete_button, "Add selection to removal package"),
         ):
             widget.setToolTip(tr(label))
             widget.setAccessibleName(tr(label))
@@ -506,7 +535,7 @@ class MainWindow(QMainWindow):
         self.status_filter.setItemText(5, tr("Check incomplete"))
         self.status_filter.setItemText(6, tr("Cannot import"))
         self.cover_button.setText(tr("Choose cover"))
-        self.restore_button.setText(tr("Restore last import"))
+        self.restore_button.setText(tr("Restore last Library change"))
         self.cancel_button.setText(tr("Cancel"))
         self.table.setHorizontalHeaderLabels(
             [
@@ -539,6 +568,8 @@ class MainWindow(QMainWindow):
         self._selection_changed()
         self.album_grid.viewport().update()
         self.status.setText(render_text(self._status_message))
+        self.delete_package_button.setText(tr("Remove package from iPod"))
+        self.removal_view.retranslate()
         self.queue_empty_title.setText(tr("Import queue is empty"))
         self.queue_empty_detail.setText(
             tr("Add files or a folder to prepare an import.")
@@ -576,11 +607,17 @@ class MainWindow(QMainWindow):
         self.table.setEnabled(not busy)
         self.library_table.setEnabled(not busy)
         self.remove_button.setEnabled(bool(self._entries) and not busy)
+        self.delete_button.setEnabled(
+            bool(self._selected_library_track_ids()) and active and not busy
+        )
         self.cover_button.setEnabled(bool(self.table.selectedItems()) and not busy)
         self.clear_cover_button.setEnabled(
             bool(self.table.selectedItems()) and not busy
         )
         self.restore_button.setEnabled(self._can_restore and not busy)
+        self.delete_package_button.setEnabled(
+            bool(self.removal_view.package_entries) and active and not busy
+        )
         self.cancel_button.setEnabled(busy)
         self.import_button.setEnabled(
             active and not busy and self._selected_count() > 0
@@ -595,6 +632,125 @@ class MainWindow(QMainWindow):
         return sum(
             self._item(row, 0).checkState() == Qt.CheckState.Checked
             for row in range(self.table.rowCount())
+        )
+
+    def _selected_library_track_ids(self) -> tuple[int, ...]:
+        if self.album_mode_button.isChecked() and (
+            self.album_detail_stack.currentWidget() is self.album_detail_page
+        ):
+            track_ids: list[int] = []
+            for row in self.album_track_table.selectionModel().selectedRows():
+                item = self.album_track_table.item(row.row(), 0)
+                if item is None:
+                    continue
+                track_id = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(track_id, int) and any(
+                    track.track_id == track_id and track.media_kind is MediaKind.MUSIC
+                    for track in self._library_tracks
+                ):
+                    track_ids.append(track_id)
+            return tuple(track_ids)
+        return tuple(
+            track.track_id
+            for row in self.library_table.selectionModel().selectedRows()
+            if not self.library_table.isRowHidden(row.row())
+            and (track := self.library_view.track_at(row.row())) is not None
+            and track.media_kind is MediaKind.MUSIC
+        )
+
+    def _request_remove_tracks(self) -> None:
+        package = self.removal_view.package_entries
+        selected_ids = tuple(entry.track.track_id for entry in package)
+        selected = tuple(entry.track for entry in package)
+        if not selected or self._active is None:
+            return
+        selected_set = set(selected_ids)
+        affected_playlists = sum(
+            any(entry.track_id in selected_set for entry in playlist.entries)
+            for playlist in self._active.library.playlists
+        )
+        details = "\n".join(
+            f"{entry.track.title} — {entry.track.artist} — {entry.track.album}  ·  {entry.source_filter}"
+            for entry in package[:12]
+        )
+        if len(selected) > 12:
+            details += "\n…"
+        prompt = tr(
+            "Remove {count} songs. {size} of unique media will be retained on the iPod for recovery."
+        ).format(
+            count=song_count(len(selected)),
+            size=readable_size(
+                removal_media_size(self.removal_view.source_snapshot, selected_ids)
+                if self.removal_view.source_snapshot is not None
+                else 0
+            ),
+        )
+        prompt += "\n\n" + tr("Affected playlists: {count}").format(
+            count=song_count(affected_playlists)
+        )
+        prompt += "\n\n" + details
+        if (
+            QMessageBox.question(
+                self,
+                tr("Review music removal"),
+                prompt,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            snapshot = self.removal_view.source_snapshot
+            active = self._active
+            if snapshot is not None:
+                self._submit(
+                    "delete",
+                    (
+                        selected_ids,
+                        snapshot,
+                        active.candidate.id.value,
+                        active.database_fingerprint.sha256,
+                    ),
+                )
+
+    def _add_removal_selection(self) -> None:
+        added = self.removal_view.add_to_package(
+            self.removal_view.selected_match_ids(),
+            self.removal_view.filter_description(),
+        )
+        if added:
+            self.sidebar.setCurrentRow(3)
+
+    def _add_all_removal_matches(self) -> None:
+        matching_ids = self.removal_view.matching_ids()
+        if not matching_ids:
+            return
+        if (
+            QMessageBox.question(
+                self,
+                tr("Add all matching music"),
+                tr("Add all {count} matching songs to the removal package?").format(
+                    count=song_count(len(matching_ids))
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.removal_view.add_to_package(
+                matching_ids, self.removal_view.filter_description()
+            )
+
+    def _add_library_selection_to_package(self) -> None:
+        selected = self._selected_library_track_ids()
+        if selected:
+            self.removal_view.add_to_package(selected, tr("Library selection"))
+            self.sidebar.setCurrentRow(3)
+
+    def _removal_package_changed(self) -> None:
+        self.delete_package_button.setEnabled(
+            bool(self.removal_view.package_entries)
+            and self._active is not None
+            and not self._busy
         )
 
     def _item(self, row: int, column: int) -> QTableWidgetItem:
@@ -674,6 +830,11 @@ class MainWindow(QMainWindow):
             self._open_album_summary = None
         self._library_device_id = device_id
         self._library_tracks = tracks
+        library = getattr(self._active, "library", None)
+        snapshot = getattr(library, "snapshot", library)
+        database_fingerprint = getattr(self._active, "database_fingerprint", None)
+        source_revision = getattr(database_fingerprint, "sha256", None)
+        self.removal_view.set_source(snapshot, device_id, source_revision)
         self.library_table.blockSignals(True)
         sorting = self.library_table.isSortingEnabled()
         self.library_table.setSortingEnabled(False)
@@ -774,6 +935,7 @@ class MainWindow(QMainWindow):
             if album.artwork_id in self._album_artwork:
                 item.setData(ARTWORK_ROLE, self._album_artwork[album.artwork_id])
             self.album_grid.addItem(item)
+        self.album_grid.update_columns()
 
     def _open_album(self, item: QListWidgetItem) -> None:
         album = item.data(ALBUM_ROLE)
@@ -803,8 +965,12 @@ class MainWindow(QMainWindow):
                 f"{max(0, track.length_ms) // 60000}:{max(0, track.length_ms) // 1000 % 60:02d}",
             )
             for column, value in enumerate(values):
-                self.album_track_table.setItem(row, column, QTableWidgetItem(value))
+                cell = QTableWidgetItem(value)
+                if column == 0:
+                    cell.setData(Qt.ItemDataRole.UserRole, track.track_id)
+                self.album_track_table.setItem(row, column, cell)
         self.album_detail_stack.setCurrentWidget(self.album_detail_page)
+        self.album_track_table.clearSelection()
         self._library_selection_changed()
 
     def _album_placeholder(self) -> QPixmap:
@@ -883,6 +1049,7 @@ class MainWindow(QMainWindow):
                 )
             ).casefold()
             self.album_grid.item(row).setHidden(bool(query and query not in haystack))
+        self.album_grid.update_columns()
         self._update_library_empty_state()
         self._library_selection_changed()
 
@@ -1060,9 +1227,9 @@ class MainWindow(QMainWindow):
         if (
             QMessageBox.question(
                 self,
-                tr("Restore last import"),
+                tr("Restore last Library change"),
                 tr(
-                    "Restore the library to its state before the last import and remove tracks added by it?"
+                    "Restore the iPod Library and music files to their state before the last Library change?"
                 ),
             )
             == QMessageBox.StandardButton.Yes
@@ -1172,7 +1339,14 @@ class MainWindow(QMainWindow):
             self._paths = ()
             self.show_entries(())
             self._update_library_table()
-            self._set_status("Restore complete")
+            self._set_status("Library restored")
+        elif command == "delete":
+            delete_result = cast("DeleteResult", reply.value)
+            self.removal_view.clear_package()
+            self._update_library_table()
+            self._set_status(
+                "Removed {count} songs", count=song_count(delete_result.removed)
+            )
         elif command == "eject":
             self._paths = ()
             self.show_entries(())

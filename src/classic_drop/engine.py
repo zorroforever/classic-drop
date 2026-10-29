@@ -28,7 +28,7 @@ from iOpenPod.app.services.device_coordinator import (
     DeviceCoordinator,
     SyncRecoveryRequiredError,
 )
-from iPodDB.library import ArtworkPixels
+from iPodDB.library import ArtworkPixels, LibrarySnapshot
 from storage import DevicePath, HostPath, Storage, capture_host_file
 
 
@@ -60,6 +60,13 @@ class ImportResult:
     added: int
     recovery_path: str
     warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteResult:
+    removed: int
+    size_bytes: int
+    recovery_path: str
 
 
 class ClassicDropEngine:
@@ -341,6 +348,13 @@ class ClassicDropEngine:
 
         checkpoint()
         active = self.active
+        latest_operation = self.history.latest_operation(self._identity())
+        if latest_operation is not None and latest_operation[1] == "delete":
+            raise ValueError(
+                source_text(
+                    "Restore the previous Library change before importing or deleting music"
+                )
+            )
         if active is not self._preview_active:
             raise ValueError(
                 source_text("The device or library changed; preview again")
@@ -480,6 +494,107 @@ class ClassicDropEngine:
         self.discard()
         return ImportResult(len(prepared), result.recovery_path, tuple(warnings))
 
+    def remove_tracks(
+        self,
+        track_ids: tuple[int, ...],
+        cancelled: Event,
+        expected_library: LibrarySnapshot | None = None,
+        expected_device_id: str | None = None,
+        expected_database_sha256: str | None = None,
+    ) -> DeleteResult:
+        self._checkpoint(cancelled)
+        active = self.active
+        if (
+            (expected_library is not None and active.library != expected_library)
+            or (
+                expected_device_id is not None
+                and active.candidate.id.value != expected_device_id
+            )
+            or (
+                expected_database_sha256 is not None
+                and active.database_fingerprint.sha256 != expected_database_sha256
+            )
+        ):
+            raise ValueError(
+                source_text("The Library changed; rebuild the removal package")
+            )
+        identity = self._identity()
+        latest_operation = self.history.latest_operation(identity)
+        if latest_operation is not None and latest_operation[1] == "delete":
+            raise ValueError(
+                source_text(
+                    "Restore the previous Library change before importing or deleting music"
+                )
+            )
+        selected_ids = tuple(dict.fromkeys(track_ids))
+        if not selected_ids:
+            raise ValueError(source_text("Select at least one song to delete"))
+        tracks = {track.track_id: track for track in active.library.tracks}
+        missing = tuple(track_id for track_id in selected_ids if track_id not in tracks)
+        if missing:
+            raise ValueError(source_text("The Library changed; select the songs again"))
+        selected = tuple(tracks[track_id] for track_id in selected_ids)
+        if any(track.media_kind.value != "music" for track in selected):
+            raise ValueError(source_text("Only music Tracks can be removed here"))
+        workspace = LibraryWorkspace()
+        workspace.load(active.library)
+        workspace.remove_tracks(selected_ids, workspace.edit_revision)
+        self.progress(WriteProgress("delete.review", "Reviewing selected music"))
+        review = self.coordinator.prepare_library(
+            LibraryPreparationRequest(
+                workspace.desired_snapshot(),
+                active,
+                workspace.generation,
+                workspace.revision,
+                delete_omissions=True,
+                device_recovery=True,
+            ),
+            self.progress,
+            cancelled,
+        )
+        self._checkpoint(cancelled)
+        if review.result.prepared is None:
+            raise ValueError(
+                source_text(
+                    "{issues}",
+                    issues="\n".join(
+                        f"{issue.code}: {issue.message} {issue.detail}"
+                        for issue in review.result.issues
+                    ),
+                )
+            )
+        if review.plan is None or not any(
+            change.subject == "track" and change.action == "delete"
+            for change in review.plan.changes
+        ):
+            raise ValueError(source_text("The deletion review contains no changes"))
+        result = self.coordinator.save_library(
+            review, active, self.progress, cancelled, retain_recovery=True
+        )
+        if result.active is None or not result.recovery_path:
+            self.pending_recovery = result.recovery_path or None
+            raise ValueError(
+                source_text(
+                    "The Library could not confirm this deletion. Recovery record: {recovery}",
+                    recovery=result.recovery_path,
+                )
+            )
+        try:
+            self.history.record_operation(identity, result.recovery_path, "delete")
+        except (OSError, ValueError, sqlite3.Error) as error:
+            self.pending_recovery = result.recovery_path
+            raise ValueError(
+                source_text(
+                    "Removal was committed, but the local recovery index could not be saved: {error}. Restore is available until Classic Drop closes.",
+                    error=str(error),
+                )
+            ) from error
+        return DeleteResult(
+            len(selected),
+            sum(track.size_bytes for track in selected),
+            result.recovery_path,
+        )
+
     def restore_last(self, cancelled: Event) -> ActiveIPod:
         self._checkpoint(cancelled)
         if self.pending_recovery:
@@ -488,11 +603,12 @@ class ClassicDropEngine:
             self.pending_recovery = None
             return recovered
         active, identity = self.active, self._identity()
-        recovery = self.history.latest(identity)
-        if not recovery:
+        operation = self.history.latest_operation(identity)
+        if not operation:
             raise ValueError(
                 source_text("This device has no recoverable import record")
             )
+        recovery, _kind = operation
         self.discard()
         self.coordinator.recover_failed_sync(active, recovery, self.progress)
         self.history.restored(identity, recovery)

@@ -205,7 +205,9 @@ def test_recovery_entry_follows_worker_availability_and_busy_state(
 
     window._succeeded("discard", Reply(None, None, True))
     assert window.restore_button.isEnabled()
-    assert window.shell.recovery_title.text() == tr("Last import can be restored")
+    assert window.shell.recovery_title.text() == tr(
+        "Last Library change can be restored"
+    )
     window.set_busy(True)
     assert not window.restore_button.isEnabled()
     window._succeeded("discard", Reply(None, None, False))
