@@ -2,7 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
 from classic_drop.engine import ImportResult, PreviewEntry
@@ -10,7 +11,8 @@ from classic_drop.i18n import song_count
 from classic_drop.window import MainWindow
 from classic_drop.worker import Reply
 from iOpenPod.app.models.artwork import ArtworkImage
-from iPodDB.library import Track, TrackMetadata
+from iPodDB.library import LibrarySnapshot, Track, TrackMetadata
+from iPodDB.library.playlists import Playlist, PlaylistEntry
 
 
 @pytest.fixture(scope="module")
@@ -40,6 +42,81 @@ def test_preview_keeps_duplicates_unchecked_and_tracks_edits(app):
     window.table.item(0, 1).setText("夜曲")
     assert window.edited_entries()[0].title == "夜曲"
     assert not window.edited_entries()[1].selected
+    window.close()
+
+
+def test_album_grid_centers_cards_when_resized_and_filtered(app):
+    window = MainWindow(start_worker=False)
+    tracks = tuple(
+        Track(
+            track_id=i + 1,
+            title=f"Track {i}",
+            artist="Artist",
+            album=f"Album {i}",
+            length_ms=60000,
+        )
+        for i in range(6)
+    )
+    window._active = SimpleNamespace(library=SimpleNamespace(tracks=tracks))
+    window.resize(1400, 760)
+    window.show()
+    window._update_library_table()
+    window._set_library_mode("album")
+    app.processEvents()
+    app.processEvents()
+
+    grid = window.album_grid
+    for width in (1400, 1050):
+        window.resize(width, 760)
+        app.processEvents()
+        app.processEvents()
+        first = grid.visualItemRect(grid.item(0))
+        rightmost = first
+        for row in range(1, grid.count()):
+            rect = grid.visualItemRect(grid.item(row))
+            if rect.y() != first.y():
+                break
+            rightmost = rect
+        left_edge = grid.viewport().x() + first.left()
+        right_edge = grid.width() - grid.viewport().x() - rightmost.right() - 1
+        assert abs(left_edge - right_edge) <= 3
+        assert first.width() == 190
+
+    window.library_search.setText("Album 3")
+    app.processEvents()
+    app.processEvents()
+    rect = grid.visualItemRect(grid.item(3))
+    centered_x = grid.viewport().x() + rect.center().x()
+    assert abs(centered_x - grid.rect().center().x()) <= 3
+    window.close()
+
+
+def test_duplicate_can_be_explicitly_selected_and_filtered(app):
+    window = MainWindow(start_worker=False)
+    window.show_entries(
+        (
+            PreviewEntry(
+                "duplicate",
+                Path("/tmp/copy.m4a"),
+                title="Copy",
+                status="confirmed_duplicate",
+                selected=False,
+                detail="SHA-256 matches queued file: original.m4a",
+            ),
+            PreviewEntry("new", Path("/tmp/new.m4a"), title="New"),
+        )
+    )
+
+    duplicate_check = window.table.item(0, 0)
+    duplicate_check.setCheckState(Qt.CheckState.Checked)
+    window.import_view.status_filter.setCurrentIndex(
+        window.import_view.status_filter.findData("confirmed_duplicate")
+    )
+
+    assert window.edited_entries()[0].selected
+    assert not window.table.isRowHidden(0)
+    assert window.table.isRowHidden(1)
+    assert "SHA-256" in window.table.item(0, 7).toolTip()
     window.close()
 
 
@@ -256,8 +333,6 @@ def test_album_artwork_result_updates_grid_and_open_detail(app):
 
 
 def test_classic_drop_button_glyphs_render_visible_pixels(app):
-    from PySide6.QtCore import QSize
-    from PySide6.QtGui import QColor
 
     from iOpenPod.GUI.presentation.icons import glyph_icon
 
@@ -351,6 +426,87 @@ def test_library_view_refreshes_after_restore(app):
 
     assert window.library_table.rowCount() == 1
     assert window.library_table.item(0, 0).text() == "Old"
+    window.close()
+
+
+def test_library_delete_selection_uses_track_ids_not_table_order(app):
+    window = MainWindow(start_worker=False)
+    tracks = (
+        Track(track_id=91, title="Second", artist="Artist", album="Album", length_ms=1),
+        Track(track_id=27, title="First", artist="Artist", album="Album", length_ms=1),
+    )
+    window._active = SimpleNamespace(library=SimpleNamespace(tracks=tracks))
+    window._update_library_table()
+    first_row = next(
+        row
+        for row in range(window.library_table.rowCount())
+        if window.library_table.item(row, 0).text() == "Second"
+    )
+    window.library_table.selectRow(first_row)
+    assert window._selected_library_track_ids() == (91,)
+    window.close()
+
+
+def test_library_delete_selection_excludes_non_music_tracks(app):
+    window = MainWindow(start_worker=False)
+    music = Track(track_id=1, title="Music", artist="A", album="B", length_ms=1)
+    podcast = Track(
+        track_id=2,
+        title="Podcast",
+        artist="A",
+        album="B",
+        length_ms=1,
+        media_types=("podcast",),
+    )
+    window._active = SimpleNamespace(library=SimpleNamespace(tracks=(music, podcast)))
+    window._update_library_table()
+    window.library_table.selectAll()
+    assert window._selected_library_track_ids() == (1,)
+    window.close()
+
+
+def test_removal_workspace_keeps_package_when_filters_change_and_binds_source(app):
+    window = MainWindow(start_worker=False)
+    tracks = (
+        Track(
+            track_id=1,
+            title="Blue Train",
+            artist="John Coltrane",
+            album="Blue Train",
+            length_ms=60000,
+            genre="Jazz",
+            year=1957,
+        ),
+        Track(
+            track_id=2,
+            title="A Love Supreme",
+            artist="John Coltrane",
+            album="A Love Supreme",
+            length_ms=60000,
+            genre="Jazz",
+            year=1965,
+        ),
+    )
+    snapshot = LibrarySnapshot(
+        tracks,
+        (Playlist(10, "Favorites", entries=(PlaylistEntry("entry", 1),)),),
+    )
+    window._active = SimpleNamespace(library=snapshot)
+    window._update_library_table()
+    removal = window.removal_view
+    assert removal.matching_ids() == (1, 2)
+    removal.add_to_package((1,), "Library selection")
+    removal.add_to_package((1,), "Title: blue")
+    assert len(removal.package_entries) == 1
+    removal.title_filter.setText("love")
+    assert removal.matching_ids() == (2,)
+    assert tuple(entry.track.track_id for entry in removal.package_entries) == (1,)
+    removal.add_to_package((2,), "Title: love")
+    assert tuple(entry.track.track_id for entry in removal.package_entries) == (1, 2)
+
+    removal.set_source(snapshot, "same-device", "new-database-revision")
+
+    assert not removal.package_entries
     window.close()
 
 

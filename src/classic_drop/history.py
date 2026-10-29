@@ -15,8 +15,13 @@ class ImportHistory:
                 "CREATE TABLE IF NOT EXISTS receipt (device TEXT, source_hash TEXT, location TEXT, size INTEGER, PRIMARY KEY(device, source_hash))"
             )
             db.execute(
-                "CREATE TABLE IF NOT EXISTS import_run (id INTEGER PRIMARY KEY, device TEXT, recovery TEXT, restored INTEGER DEFAULT 0, created TEXT DEFAULT CURRENT_TIMESTAMP)"
+                "CREATE TABLE IF NOT EXISTS import_run (id INTEGER PRIMARY KEY, device TEXT, recovery TEXT, restored INTEGER DEFAULT 0, created TEXT DEFAULT CURRENT_TIMESTAMP, operation TEXT DEFAULT 'import')"
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(import_run)")}
+            if "operation" not in columns:
+                db.execute(
+                    "ALTER TABLE import_run ADD COLUMN operation TEXT DEFAULT 'import'"
+                )
 
     def _connection(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -51,6 +56,21 @@ class ImportHistory:
                 (device,),
             ).fetchone()
             return str(row[0]) if row else None
+
+    def record_operation(self, device: str, recovery: str, operation: str) -> None:
+        with self._connection() as db:
+            db.execute(
+                "INSERT INTO import_run(device,recovery,operation) VALUES(?,?,?)",
+                (device, recovery, operation),
+            )
+
+    def latest_operation(self, device: str) -> tuple[str, str] | None:
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT recovery, operation FROM import_run WHERE device=? AND restored=0 ORDER BY id DESC LIMIT 1",
+                (device,),
+            ).fetchone()
+            return (str(row[0]), str(row[1])) if row else None
 
     def restored(self, device: str, recovery: str) -> None:
         with self._connection() as db:

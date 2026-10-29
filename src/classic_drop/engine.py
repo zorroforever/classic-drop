@@ -10,11 +10,17 @@ from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
+from classic_drop.duplicate import MetadataCandidateIndex
 from classic_drop.history import ImportHistory
 from classic_drop.media import PreparedSong, collect_audio, prepare_song
+from classic_drop.removal import removal_media_size
 from iOpenPod.app.display_text import exception_text, source_text
 from iOpenPod.app.library_workspace import LibraryWorkspace
-from iOpenPod.app.library_write import LibraryPreparationRequest, WriteProgress
+from iOpenPod.app.library_write import (
+    LibraryPreparationRequest,
+    LibraryReview,
+    WriteProgress,
+)
 from iOpenPod.app.media.importing import relocate_song
 from iOpenPod.app.media.music_paths import MusicPathAllocator
 from iOpenPod.app.models.device import (
@@ -25,10 +31,12 @@ from iOpenPod.app.models.device import (
 )
 from iOpenPod.app.services.device_coordinator import (
     DeviceCoordinator,
+    SyncCleanupCompletedError,
     SyncRecoveryRequiredError,
+    SyncRecoveryRestoredError,
 )
-from iPodDB.library import ArtworkPixels
-from storage import HostPath, Storage, capture_host_file
+from iPodDB.library import ArtworkPixels, LibrarySnapshot
+from storage import DevicePath, HostPath, Storage, capture_host_file
 
 
 class OperationCancelledError(Exception):
@@ -61,6 +69,21 @@ class ImportResult:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class DeleteResult:
+    removed: int
+    size_bytes: int
+    recovery_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemovalReview:
+    source: ActiveIPod
+    track_ids: tuple[int, ...]
+    library_review: LibraryReview
+    size_bytes: int
+
+
 class ClassicDropEngine:
     def __init__(
         self,
@@ -86,6 +109,7 @@ class ClassicDropEngine:
         self._songs: dict[str, PreparedSong] = {}
         self._preview_active: ActiveIPod | None = None
         self.pending_recovery: str | None = None
+        self._removal_review: RemovalReview | None = None
         self._entries: dict[Path, PreviewEntry] = {}
 
     @property
@@ -103,13 +127,16 @@ class ClassicDropEngine:
         )
 
     def select(self, candidate_id: DeviceCandidateId) -> ActiveIPod:
+        self._require_no_pending_recovery()
         candidate = self.coordinator.discovery.candidate(candidate_id)
         if (
             candidate is None
             or candidate.profile is None
             or candidate.profile.family != "iPod Classic"
         ):
-            raise ValueError(source_text("Only stock-firmware iPod Classic is supported"))
+            raise ValueError(
+                source_text("Only stock-firmware iPod Classic is supported")
+            )
         if candidate.readiness not in (
             DeviceReadiness.READY,
             DeviceReadiness.SYNC_RECOVERY_REQUIRED,
@@ -138,7 +165,9 @@ class ClassicDropEngine:
         ):
             self.coordinator.close()
             raise ValueError(
-                source_text("Device artwork database is unreadable; restore a library backup first")
+                source_text(
+                    "Device artwork database is unreadable; restore a library backup first"
+                )
             )
         return active
 
@@ -152,6 +181,24 @@ class ClassicDropEngine:
         if cancelled.is_set():
             raise OperationCancelledError(source_text("Operation canceled"))
 
+    def _require_no_pending_recovery(self) -> None:
+        if self.pending_recovery:
+            raise ValueError(
+                source_text(
+                    "Restore the previous Library change before importing or deleting music"
+                )
+            )
+
+    def _require_writes_allowed(self) -> None:
+        self._require_no_pending_recovery()
+        operation = self.history.latest_operation(self._identity())
+        if operation is not None and operation[1] == "delete":
+            raise ValueError(
+                source_text(
+                    "Restore the previous Library change before importing or deleting music"
+                )
+            )
+
     def preview(
         self, paths: tuple[Path, ...], cancelled: Event
     ) -> tuple[PreviewEntry, ...]:
@@ -164,9 +211,13 @@ class ClassicDropEngine:
             self._checkpoint(cancelled)
 
         receipts = self.history.receipts(self._identity())
-        retained = {(t.metadata.location, t.size_bytes) for t in active.library.tracks}
-        seen: set[str] = set()
+        seen: dict[str, PreviewEntry] = {}
+        for old_entry in self._entries.values():
+            old_song = self._songs.get(old_entry.token)
+            if old_song is not None:
+                seen.setdefault(old_song.original.sha256, old_entry)
         entries: list[PreviewEntry] = []
+        candidate_index = MetadataCandidateIndex(active.library.tracks)
         with self.coordinator.sync_session(active) as session:
             device_root = session.mounted_volume.mount_point.path.resolve()
         sources = collect_audio(paths)
@@ -176,36 +227,29 @@ class ClassicDropEngine:
                 entry = self._entries[path]
                 entries.append(entry)
                 if entry.token in self._songs:
-                    seen.add(self._songs[entry.token].original.sha256)
+                    seen.setdefault(self._songs[entry.token].original.sha256, entry)
                 continue
             self.progress(
-                WriteProgress("inspect", "Inspecting music", index, len(sources), path.name)
+                WriteProgress(
+                    "inspect", "Inspecting music", index, len(sources), path.name
+                )
             )
             token = uuid4().hex
             try:
                 if path.resolve().is_relative_to(device_root):
                     raise ValueError(
-                        source_text("Choose music from this Mac, not from the iPod itself")
+                        source_text(
+                            "Choose music from this Mac, not from the iPod itself"
+                        )
                     )
                 prepared = prepare_song(
                     path, active.profile, self._resources, checkpoint
                 )
                 song = prepared.song
                 sha = prepared.original.sha256
-                status = "new"
-                if sha in seen:
-                    status = "duplicate"
-                elif receipts.get(sha) in retained:
-                    status = "imported"
-                elif any(
-                    t.title.casefold() == song.track.title.casefold()
-                    and t.artist.casefold() == song.track.artist.casefold()
-                    and t.album.casefold() == song.track.album.casefold()
-                    and abs(t.length_ms - song.track.length_ms) < 1500
-                    for t in active.library.tracks
-                ):
-                    status = "possible_duplicate"
-                seen.add(sha)
+                status, detail = self._duplicate_status(
+                    sha, prepared, seen, receipts, active, candidate_index
+                )
                 self._songs[token] = prepared
                 entries.append(
                     PreviewEntry(
@@ -223,9 +267,10 @@ class ClassicDropEngine:
                         song.track.length_ms,
                         song.track.size_bytes,
                         song.artwork,
-                        "\n".join(prepared.warnings),
+                        "\n".join(filter(None, (detail, *prepared.warnings))),
                     )
                 )
+                seen.setdefault(sha, entries[-1])
             except OperationCancelledError:
                 raise
             except Exception as error:
@@ -242,6 +287,94 @@ class ClassicDropEngine:
         self._entries = {entry.path: entry for entry in entries}
         return tuple(entries)
 
+    def _duplicate_status(
+        self,
+        sha: str,
+        prepared: PreparedSong,
+        seen: dict[str, PreviewEntry],
+        receipts: dict[str, tuple[str, int]],
+        active: ActiveIPod,
+        candidates_index: MetadataCandidateIndex,
+    ) -> tuple[str, str]:
+        queued = seen.get(sha)
+        if queued is not None:
+            return (
+                "confirmed_duplicate",
+                source_text(
+                    "SHA-256 matches queued file: {name}", name=queued.path.name
+                ),
+            )
+
+        recorded = receipts.get(sha)
+        receipt_track = next(
+            (
+                track
+                for track in active.library.tracks
+                if recorded == (track.metadata.location, track.size_bytes)
+            ),
+            None,
+        )
+        candidates = candidates_index.find(prepared.song.track)
+        if receipt_track is not None and receipt_track not in candidates:
+            candidates = (*candidates, receipt_track)
+
+        if candidates:
+            failures: list[str] = []
+            try:
+                with self.coordinator.sync_session(active) as session:
+                    for candidate in candidates:
+                        if candidate.size_bytes != prepared.original.size:
+                            continue
+                        try:
+                            observed = session.fingerprint(
+                                DevicePath(candidate.metadata.location)
+                            )
+                        except Exception as error:
+                            failures.append(f"{candidate.metadata.location}: {error}")
+                            continue
+                        if observed.sha256 == sha:
+                            return (
+                                "confirmed_duplicate",
+                                source_text(
+                                    "SHA-256 matches iPod track: {title}",
+                                    title=candidate.title,
+                                ),
+                            )
+            except Exception as error:
+                failures.append(f"iPod candidate session: {error}")
+            if failures:
+                return (
+                    "check_incomplete",
+                    source_text(
+                        "Could not verify matching iPod candidates: {details}",
+                        details="; ".join(failures),
+                    ),
+                )
+
+        if receipt_track is not None:
+            return (
+                "history_match",
+                source_text(
+                    "Prior import receipt matches {path}; device content differs",
+                    path=receipt_track.metadata.location,
+                ),
+            )
+        if candidates:
+            candidate = candidates[0]
+            return (
+                "possible_duplicate",
+                source_text(
+                    "Title and artist match; duration differs by {duration} ms: {title} — {artist} — {album}",
+                    duration=str(
+                        abs(candidate.length_ms - prepared.song.track.length_ms)
+                    ),
+                    title=candidate.title,
+                    artist=candidate.artist,
+                    album=candidate.album,
+                ),
+            )
+        return "new", source_text("No matching queue item or iPod track found")
+
     def commit(
         self, entries: tuple[PreviewEntry, ...], cancelled: Event
     ) -> ImportResult:
@@ -250,8 +383,11 @@ class ClassicDropEngine:
 
         checkpoint()
         active = self.active
+        self._require_writes_allowed()
         if active is not self._preview_active:
-            raise ValueError(source_text("The device or library changed; preview again"))
+            raise ValueError(
+                source_text("The device or library changed; preview again")
+            )
         selected = tuple(e for e in entries if e.selected)
         if not selected:
             raise ValueError(source_text("Select at least one song to import"))
@@ -260,13 +396,17 @@ class ClassicDropEngine:
             checkpoint()
             item = self._songs.get(entry.token)
             if item is None or entry.path != item.path:
-                raise ValueError(source_text("The preview expired; select the files again"))
+                raise ValueError(
+                    source_text("The preview expired; select the files again")
+                )
             if (
                 not entry.title.strip()
                 or min(entry.track_number, entry.disc_number) < 0
             ):
                 raise ValueError(
-                    source_text("A title is required and track and disc numbers cannot be negative")
+                    source_text(
+                        "A title is required and track and disc numbers cannot be negative"
+                    )
                 )
             with capture_host_file(
                 HostPath(item.path), checkpoint=checkpoint
@@ -274,7 +414,8 @@ class ClassicDropEngine:
                 if source.fingerprint.sha256 != item.original.sha256:
                     raise ValueError(
                         source_text(
-                            "File changed; preview it again: {name}", name=item.path.name
+                            "File changed; preview it again: {name}",
+                            name=item.path.name,
                         )
                     )
             prepared.append((entry, item))
@@ -330,7 +471,8 @@ class ClassicDropEngine:
                 source_text(
                     "{issues}",
                     issues="\n".join(
-                        f"{i.code}: {i.message} {i.detail}" for i in review.result.issues
+                        f"{i.code}: {i.message} {i.detail}"
+                        for i in review.result.issues
                     ),
                 )
             )
@@ -339,7 +481,9 @@ class ClassicDropEngine:
             f.action != "write" or f.path in retained_paths for f in review.file_changes
         ):
             raise ValueError(
-                source_text("Append-only import cannot delete or overwrite retained music")
+                source_text(
+                    "Append-only import cannot delete or overwrite retained music"
+                )
             )
         checkpoint()
         result = self.coordinator.save_library(
@@ -379,21 +523,168 @@ class ClassicDropEngine:
         self.discard()
         return ImportResult(len(prepared), result.recovery_path, tuple(warnings))
 
+    def remove_tracks(
+        self,
+        track_ids: tuple[int, ...],
+        cancelled: Event,
+        expected_library: LibrarySnapshot | None = None,
+        expected_device_id: str | None = None,
+        expected_database_sha256: str | None = None,
+    ) -> DeleteResult:
+        review = self.prepare_removal(
+            track_ids,
+            cancelled,
+            expected_library,
+            expected_device_id,
+            expected_database_sha256,
+        )
+        return self.commit_removal(review, cancelled)
+
+    def prepare_removal(
+        self,
+        track_ids: tuple[int, ...],
+        cancelled: Event,
+        expected_library: LibrarySnapshot | None = None,
+        expected_device_id: str | None = None,
+        expected_database_sha256: str | None = None,
+    ) -> RemovalReview:
+        self._checkpoint(cancelled)
+        self._require_writes_allowed()
+        self._removal_review = None
+        active = self.active
+        if (
+            (expected_library is not None and active.library != expected_library)
+            or (
+                expected_device_id is not None
+                and active.candidate.id.value != expected_device_id
+            )
+            or (
+                expected_database_sha256 is not None
+                and active.database_fingerprint.sha256 != expected_database_sha256
+            )
+        ):
+            raise ValueError(
+                source_text("The Library changed; rebuild the removal package")
+            )
+        selected_ids = tuple(dict.fromkeys(track_ids))
+        if not selected_ids:
+            raise ValueError(source_text("Select at least one song to delete"))
+        tracks = {track.track_id: track for track in active.library.tracks}
+        missing = tuple(track_id for track_id in selected_ids if track_id not in tracks)
+        if missing:
+            raise ValueError(source_text("The Library changed; select the songs again"))
+        selected = tuple(tracks[track_id] for track_id in selected_ids)
+        if any(track.media_kind.value != "music" for track in selected):
+            raise ValueError(source_text("Only music Tracks can be removed here"))
+        workspace = LibraryWorkspace()
+        workspace.load(active.library)
+        workspace.remove_tracks(selected_ids, workspace.edit_revision)
+        self.progress(WriteProgress("delete.review", "Reviewing selected music"))
+        review = self.coordinator.prepare_library(
+            LibraryPreparationRequest(
+                workspace.desired_snapshot(),
+                active,
+                workspace.generation,
+                workspace.revision,
+                delete_omissions=True,
+                device_recovery=True,
+            ),
+            self.progress,
+            cancelled,
+        )
+        self._checkpoint(cancelled)
+        if review.result.prepared is None:
+            raise ValueError(
+                source_text(
+                    "{issues}",
+                    issues="\n".join(
+                        f"{issue.code}: {issue.message} {issue.detail}"
+                        for issue in review.result.issues
+                    ),
+                )
+            )
+        if review.plan is None or not any(
+            change.subject == "track" and change.action == "delete"
+            for change in review.plan.changes
+        ):
+            raise ValueError(source_text("The deletion review contains no changes"))
+        self._removal_review = RemovalReview(
+            active,
+            selected_ids,
+            review,
+            removal_media_size(active.library, selected_ids),
+        )
+        return self._removal_review
+
+    def commit_removal(self, review: RemovalReview, cancelled: Event) -> DeleteResult:
+        self._checkpoint(cancelled)
+        self._require_writes_allowed()
+        active = self.active
+        if review is not self._removal_review or review.source is not active:
+            raise ValueError(
+                source_text("The Library changed; rebuild the removal package")
+            )
+        self._removal_review = None
+        identity = self._identity()
+        result = self.coordinator.save_library(
+            review.library_review,
+            active,
+            self.progress,
+            cancelled,
+            retain_recovery=True,
+        )
+        if result.active is None or not result.recovery_path:
+            self.pending_recovery = result.recovery_path or None
+            raise ValueError(
+                source_text(
+                    "The Library could not confirm this deletion. Recovery record: {recovery}",
+                    recovery=result.recovery_path,
+                )
+            )
+        try:
+            self.history.record_operation(identity, result.recovery_path, "delete")
+        except (OSError, ValueError, sqlite3.Error) as error:
+            self.pending_recovery = result.recovery_path
+            raise ValueError(
+                source_text(
+                    "Removal was committed, but the local recovery index could not be saved: {error}. Restore is available until Classic Drop closes.",
+                    error=str(error),
+                )
+            ) from error
+        return DeleteResult(
+            len(review.track_ids),
+            review.size_bytes,
+            result.recovery_path,
+        )
+
     def restore_last(self, cancelled: Event) -> ActiveIPod:
         self._checkpoint(cancelled)
         if self.pending_recovery:
             self.discard()
-            recovered = self.coordinator.recover_sync_journal(self.pending_recovery)
+            try:
+                recovered = self.coordinator.recover_sync_journal(self.pending_recovery)
+            except SyncRecoveryRestoredError:
+                self.pending_recovery = None
+                raise
+            except SyncRecoveryRequiredError as error:
+                self.pending_recovery = error.recovery_path
+                raise
             self.pending_recovery = None
             return recovered
         active, identity = self.active, self._identity()
-        recovery = self.history.latest(identity)
-        if not recovery:
+        operation = self.history.latest_operation(identity)
+        if not operation:
             raise ValueError(
                 source_text("This device has no recoverable import record")
             )
+        recovery, _kind = operation
         self.discard()
-        self.coordinator.recover_failed_sync(active, recovery, self.progress)
+        try:
+            self.coordinator.recover_failed_sync(active, recovery, self.progress)
+        except SyncCleanupCompletedError:
+            self.history.restored(identity, recovery)
+            self.coordinator.close()
+            raise
         self.history.restored(identity, recovery)
         candidate = active.candidate.id
         self.coordinator.discover_devices()
@@ -404,6 +695,7 @@ class ClassicDropEngine:
         self.discard()
 
     def discard(self) -> None:
+        self._removal_review = None
         self._resources.close()
         self._resources = ExitStack()
         self._songs.clear()

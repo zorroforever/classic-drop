@@ -21,6 +21,7 @@ It is designed for people who want to keep the music already on an iPod, add a f
 - **Album view:** switch between a track list and an artwork grid, then double-click an album to inspect its tracks, year, duration, and cover.
 - **Duplicate-aware queue:** likely duplicates are unchecked by default and can be reviewed before import.
 - **Recovery:** interrupted writes keep a recovery record and expose a restore action in the app.
+- **macOS workspaces:** sidebar navigation, a native toolbar, a collapsible artwork inspector, and system palette support in English, Simplified Chinese, and Japanese.
 - **Read-only device discovery:** connecting, discovering, and browsing do not modify the iPod.
 
 ## Scope and non-goals
@@ -77,7 +78,7 @@ The generated application is an Apple Silicon build when built on the current de
 
 1. Connect the iPod and wait for macOS to mount it.
 2. Open Classic Drop and choose **Refresh** if the device is not listed.
-3. Select the iPod. The **iPod Library** tab is read-only and can be searched in list or album mode.
+3. Select the iPod. The **iPod Library** workspace is read-only and can be searched in list or album mode; use the sidebar to switch workspaces.
 4. Open **To Import**, add files or a folder, and review the detected metadata and artwork.
 5. Leave unwanted or duplicate tracks unchecked, then explicitly choose **Import Selected**.
 6. Wait for verification to finish and use the app's eject action before disconnecting.
@@ -101,6 +102,7 @@ The Classic Drop implementation is split into:
 - `src/classic_drop/worker.py` - serialized device/media operations;
 - `src/classic_drop/window.py` - Qt application window and import/library workflows;
 - `src/classic_drop/albums.py` - album grouping, artwork cards, and album presentation;
+- `src/classic_drop/shell.py`, `library_view.py`, `import_view.py`, and `presentation.py` - workspace shell, focused view widgets, and shared native-palette presentation;
 - `tests/classic_drop/` - engine, media, worker, and UI regression tests.
 
 The underlying iPod database and storage code is provided by the iOpenPod project in this repository. See [`CLASSIC_DROP.md`](CLASSIC_DROP.md), the architecture records in [`docs/adr/`](docs/adr/), and the upstream acknowledgements for additional context.

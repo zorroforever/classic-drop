@@ -11,11 +11,12 @@ from typing import cast
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from classic_drop.engine import ClassicDropEngine, PreviewEntry
+from classic_drop.engine import ClassicDropEngine, PreviewEntry, RemovalReview
 from classic_drop.media import decode_cover
 from iOpenPod.app.display_text import SourceText
 from iOpenPod.app.models.artwork import ArtworkRequest
 from iOpenPod.app.models.device import ActiveIPod, DeviceCandidateId
+from iPodDB.library import LibrarySnapshot
 from storage import HostPath
 from storage.host_input import LocalHostFile
 
@@ -78,6 +79,21 @@ class Worker(QObject):
             elif command == "commit":
                 result = engine.commit(
                     cast("tuple[PreviewEntry, ...]", payload), self.cancelled
+                )
+            elif command == "prepare_delete":
+                track_ids, expected_library, device_id, database_sha256 = cast(
+                    "tuple[tuple[int, ...], object, str, str]", payload
+                )
+                result = engine.prepare_removal(
+                    track_ids,
+                    self.cancelled,
+                    cast("LibrarySnapshot", expected_library),
+                    device_id,
+                    database_sha256,
+                )
+            elif command == "delete":
+                result = engine.commit_removal(
+                    cast("RemovalReview", payload), self.cancelled
                 )
             elif command == "restore":
                 result = engine.restore_last(self.cancelled)

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Classic Drop</title>
+  <desc>Silver music player with a blue drop and a white import arrow.</desc>
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="0.7" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset=".4" stop-color="#edf1f5"/>
+      <stop offset=".75" stop-color="#cbd3dc"/>
+      <stop offset="1" stop-color="#f4f6f9"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f9fcff"/>
+      <stop offset=".5" stop-color="#b1bccb"/>
+      <stop offset="1" stop-color="#7f8fa3"/>
+    </linearGradient>
+    <linearGradient id="display" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#172a40"/>
+      <stop offset="1" stop-color="#071421"/>
+    </linearGradient>
+    <linearGradient id="wheel" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6ebf1"/>
+    </linearGradient>
+    <linearGradient id="drop" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#64e5ff"/>
+      <stop offset=".4" stop-color="#20b7ff"/>
+      <stop offset="1" stop-color="#1264f4"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffffff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Soft edge shadows are plain vector geometry for identical Qt rendering. -->
+  <rect x="73" y="85" width="878" height="878" rx="200" fill="#10223a" opacity=".04"/>
+  <rect x="77" y="84" width="870" height="870" rx="196" fill="#10223a" opacity=".07"/>
+  <rect x="82" y="80" width="860" height="860" rx="190" fill="url(#edge)"/>
+  <rect x="86" y="82" width="852" height="850" rx="186" fill="url(#metal)"/>
+  <path d="M278 88h468c105 0 186 76 186 181v34c-6-119-82-198-190-198H282c-108 0-184 79-190 198v-34c0-105 81-181 186-181Z" fill="#fff" opacity=".8"/>
+  <!-- Recessed screen; no lettering or fine details that disappear in the Dock. -->
+  <rect x="215" y="190" width="594" height="298" rx="48" fill="#fff" opacity=".7"/>
+  <rect x="220" y="195" width="584" height="288" rx="44" fill="#8997a8"/>
+  <rect x="226" y="201" width="572" height="276" rx="39" fill="url(#display)"/>
+  <path d="M268 209h488c17 0 31 14 31 31v24L237 407V240c0-17 14-31 31-31Z" fill="url(#shine)" opacity=".11"/>
+  <!-- A single clean waveform establishes music without adding tiny text. -->
+  <g stroke="#6fdcff" stroke-width="15" stroke-linecap="round">
+    <path d="M318 323v35M369 291v99M420 269v143M471 302v77M522 283v115M573 311v60M624 277v129M675 300v83M726 323v35"/>
+  </g>
+  <!-- Large white wheel retains its silhouette at 16 and 32 pixels. -->
+  <circle cx="439" cy="686" r="164" fill="#8996a7" opacity=".22"/>
+  <circle cx="439" cy="682" r="160" fill="url(#wheel)" stroke="#fff" stroke-width="3"/>
+  <circle cx="439" cy="682" r="65" fill="url(#metal)" stroke="#c0cad5" stroke-width="3"/>
+  <path d="M426 565h26" stroke="#9ba7b6" stroke-width="8" stroke-linecap="round"/>
+  <path d="m429 788 13 9-13 9Zm22 0v18m9-18v18" fill="#9ba7b6" stroke="#9ba7b6" stroke-width="3" stroke-linejoin="round"/>
+  <path d="m322 676-11 8 11 8m14-16-11 8 11 8m-28-16v16" fill="none" stroke="#a0abba" stroke-width="5" stroke-linejoin="round"/>
+  <!-- The drop is the foreground signature of Classic Drop. -->
+  <path d="M727 487C696 541 600 632 600 720c0 80 59 139 135 139s135-59 135-139c0-87-97-179-143-233Z" fill="#103d83" opacity=".12"/>
+  <path d="M723 470C692 524 596 615 596 703c0 80 59 139 135 139s135-59 135-139c0-87-97-179-143-233Z" fill="url(#drop)"/>
+  <path d="M723 481C688 542 608 619 606 692c7-78 90-148 117-191 28 35 102 110 126 166-14-66-95-152-126-186Z" fill="#d1f7ff" opacity=".6"/>
+  <path d="M652 692c-10 37-1 77 28 102" fill="none" stroke="#ddf8ff" stroke-width="9" stroke-linecap="round" opacity=".22"/>
+  <path d="M731 616v122m-43-43 43 43 43-43" fill="none" stroke="#fff" stroke-width="23" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

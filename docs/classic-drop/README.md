@@ -11,14 +11,14 @@
 
 ## 异地接续
 
-当前公开文档提交基于分支 `codex/classic-drop-development` 的 `e359c16`（多语言需求测试草案）。在新电脑上执行：
+多语言实现已随 `96e9b13` 合入 `main`，不再需要从原电脑找回未提交代码。新电脑可从公开主分支接续：
 
 ```powershell
-git switch codex/classic-drop-development
+git switch main
 git pull --ff-only
 ```
 
-本次交接提交只包含 `docs/` 下的规划、设计和视觉资产。多语言实现已经在原电脑工作区完成一版，但仍未提交，因此新克隆不会包含 `src/classic_drop/i18n.py`、翻译目录及相关代码改动；要继续该实现，应从原电脑另行提交/推送代码，或按开发清单重新实现。
+2026-10-29 的 macOS UI 外壳实现仍在当前开发工作区，是否可在新克隆取得应以 Git 提交为准；已完成项、实际验证范围与平台验收缺口见开发清单。
 
 ## 建议顺序
 

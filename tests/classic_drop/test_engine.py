@@ -4,7 +4,7 @@ from threading import Event
 import pytest
 
 from classic_drop.engine import ClassicDropEngine, OperationCancelledError
-from iOpenPod.app.display_text import source_text
+from iOpenPod.app.display_text import SourceText, source_text
 from iPodDB.iTunesDB.writer.signature import verify_hash58
 from iPodDB.library import CoverFormat, CoverPixelFormat, IPodLibrary
 from tests.classic_drop.test_media import media_file
@@ -40,7 +40,9 @@ def test_selection_and_preview_do_not_write_the_device(connected, tmp_path):
     } == before
 
 
-def test_preview_preserves_translatable_error_template(connected, tmp_path, monkeypatch):
+def test_preview_preserves_translatable_error_template(
+    connected, tmp_path, monkeypatch
+):
     _device, engine = connected
     source = media_file(tmp_path)
 
@@ -94,13 +96,13 @@ def test_append_preserves_old_library_and_writes_signed_covers(connected, tmp_pa
         assert len(set(pixels.rgb888)) > 1
 
 
-def test_repeat_import_is_deselected_from_receipt(connected, tmp_path):
+def test_repeat_import_is_verified_against_current_library(connected, tmp_path):
     _device, engine = connected
     source = media_file(tmp_path)
     engine.commit(engine.preview((source,), Event()), Event())
     again = engine.preview((source,), Event())
     assert len(again) == 1 and not again[0].selected
-    assert again[0].status == "imported"
+    assert again[0].status == "confirmed_duplicate"
 
 
 def test_batch_duplicate_is_not_added_twice(connected, tmp_path):
@@ -110,6 +112,56 @@ def test_batch_duplicate_is_not_added_twice(connected, tmp_path):
     duplicate.write_bytes(source.read_bytes())
     entries = engine.preview((source, duplicate), Event())
     assert sum(e.selected for e in entries) == 1
+    assert entries[1].status == "confirmed_duplicate"
+
+
+def test_duplicates_added_in_later_batches_are_detected(connected, tmp_path):
+    _device, engine = connected
+    source = media_file(tmp_path)
+    duplicate = tmp_path / "later-copy.m4a"
+    duplicate.write_bytes(source.read_bytes())
+
+    first_batch = engine.preview((source,), Event())
+    combined = engine.preview((source, duplicate), Event())
+
+    assert len(combined) == 2
+    assert combined[0].token == first_batch[0].token
+    assert combined[1].status == "confirmed_duplicate"
+    assert not combined[1].selected
+
+
+def test_matching_library_content_is_verified_from_device(connected, tmp_path):
+    device, engine = connected
+    source = media_file(tmp_path)
+    engine.commit(engine.preview((source,), Event()), Event())
+    duplicate = tmp_path / "same-content-different-name.m4a"
+    duplicate.write_bytes(source.read_bytes())
+
+    entry = engine.preview((duplicate,), Event())[0]
+
+    assert entry.status == "confirmed_duplicate"
+    assert not entry.selected
+    assert "SHA-256" in entry.detail
+    assert device.root.joinpath(
+        engine.active.library.tracks[-1].metadata.location
+    ).exists()
+
+
+def test_history_receipt_with_changed_device_content_is_not_confirmed(
+    connected, tmp_path
+):
+    device, engine = connected
+    source = media_file(tmp_path)
+    engine.commit(engine.preview((source,), Event()), Event())
+    target = device.root / engine.active.library.tracks[-1].metadata.location
+    contents = target.read_bytes()
+    target.write_bytes(bytes([contents[0] ^ 1]) + contents[1:])
+
+    entry = engine.preview((source,), Event())[0]
+
+    assert entry.status == "history_match"
+    assert not entry.selected
+    assert "device content differs" in entry.detail
 
 
 def test_changed_source_cannot_publish_library(connected, tmp_path):
@@ -117,8 +169,12 @@ def test_changed_source_cannot_publish_library(connected, tmp_path):
     source = media_file(tmp_path)
     entries = engine.preview((source,), Event())
     source.write_bytes(source.read_bytes() + b"changed")
-    with pytest.raises(ValueError, match=r"changed|Changed|match|改变|变化"):
+    with pytest.raises(ValueError) as captured:
         engine.commit(entries, Event())
+    message = captured.value.args[0]
+    assert isinstance(message, SourceText)
+    assert message.source == "File changed; preview it again: {name}"
+    assert message.parameters == (("name", source.name),)
     device.assert_original()
 
 
@@ -141,6 +197,24 @@ def test_restore_last_import_recovers_previous_bytes(connected, tmp_path):
     device.assert_original()
     assert not (device.root / added_path).exists()
     assert result.recovery_path
+
+
+def test_successive_imports_remain_individually_recoverable(connected, tmp_path):
+    device, engine = connected
+    first_source = media_file(tmp_path, "chapters-cover.m4a")
+    second_source = media_file(tmp_path, "tone.m4a")
+    original = engine.active.library
+
+    engine.commit(engine.preview((first_source,), Event()), Event())
+    after_first = engine.active.library
+    engine.commit(engine.preview((second_source,), Event()), Event())
+
+    engine.restore_last(Event())
+    assert engine.active.library == after_first
+
+    engine.restore_last(Event())
+    assert engine.active.library == original
+    device.assert_original()
 
 
 def test_user_edits_apply_only_to_new_tracks(connected, tmp_path):

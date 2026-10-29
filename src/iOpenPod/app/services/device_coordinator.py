@@ -1429,6 +1429,7 @@ class DeviceCoordinator:
                         expected.database_name
                     ),
                     allow_unchanged=allow_unchanged,
+                    device_recovery=request.device_recovery,
                 )
                 if write is None:
                     # Changed reviews validate all captured files through their
@@ -4164,24 +4165,28 @@ def _read_device_guid(
     hardware_evidence: DeviceEvidence,
 ) -> bytes:
     """Use connection-bound hardware identity before optional metadata caches."""
-    evidence = hardware_evidence
-    if not evidence.transport_serials:
+    candidates = _signing_guid_candidates(hardware_evidence)
+    if not candidates:
         evidence, _issues = _read_device_metadata(session)
-    if not evidence.transport_serials:
-        return b""
-    authority = max(item.authority for item in evidence.transport_serials)
-    candidates = {
-        item.value.strip().lower().removeprefix("0x")
+        candidates = _signing_guid_candidates(evidence)
+    return next(iter(candidates)) if len(candidates) == 1 else b""
+
+
+def _signing_guid_candidates(evidence: DeviceEvidence) -> set[bytes]:
+    # Generic USB serials and the device's FireWire GUID may coexist in a probe.
+    # Only complete GUIDs participate in signing-identity conflict detection.
+    identifiers = tuple(
+        (item.authority, value)
         for item in evidence.transport_serials
-        if item.authority == authority
-    }
-    if len(candidates) != 1:
-        return b""
-    try:
-        result = bytes.fromhex(next(iter(candidates)))
-    except ValueError:
-        return b""
-    return result if len(result) == 8 else b""
+        if re.fullmatch(
+            r"[0-9a-f]{16}",
+            value := item.value.strip().lower().removeprefix("0x"),
+        )
+    )
+    if not identifiers:
+        return set()
+    authority = max(item[0] for item in identifiers)
+    return {bytes.fromhex(value) for rank, value in identifiers if rank == authority}
 
 
 def _read_hash72_material(

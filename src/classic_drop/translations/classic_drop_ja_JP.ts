@@ -3,6 +3,16 @@
 <TS version="2.1" language="ja_JP" sourcelanguage="en_US">
   <context>
     <name>ClassicDrop</name>
+    <message><source>Workspaces</source><translation>ワークスペース</translation></message>
+    <message><source>Current iPod</source><translation>現在の iPod</translation></message>
+    <message><source>Toggle inspector</source><translation>インスペクタを表示・非表示</translation></message>
+    <message><source>Recovery &amp; History</source><translation>復元と履歴</translation></message>
+    <message><source>Last import can be restored</source><translation>前回の読み込みを復元できます</translation></message>
+    <message><source>No recovery available</source><translation>復元できる記録がありません</translation></message>
+    <message><source>Restore the selected iPod to its state before the last import.</source><translation>選択した iPod を前回の読み込み前の状態に戻します。</translation></message>
+    <message><source>Connect an iPod with a recoverable import to restore its Library.</source><translation>復元できる読み込み記録のある iPod を接続してください。</translation></message>
+    <message><source>{count} selected</source><translation>{count}を選択中</translation></message>
+    <message><source>Quit Classic Drop</source><translation>Classic Drop を終了</translation></message>
     <message><source>More</source><translation>その他</translation></message>
     <message><source>Settings</source><translation>設定</translation></message>
     <message><source>General</source><translation>一般</translation></message>
@@ -15,12 +25,15 @@
     <message><source>Refresh devices</source><translation>デバイスを更新</translation></message>
     <message><source>Safely eject</source><translation>安全に取り出す</translation></message>
     <message><source>No device connected</source><translation>デバイスが接続されていません</translation></message>
+    <message><source>No iPod connected</source><translation>iPod が接続されていません</translation></message>
+    <message><source>Connect an iPod Classic to view its Library.</source><translation>iPod Classic を接続するとライブラリが表示されます。</translation></message>
+    <message><source>No music on this iPod</source><translation>この iPod に音楽がありません</translation></message>
+    <message><source>The selected iPod Library contains no tracks.</source><translation>選択した iPod のライブラリに曲がありません。</translation></message>
+    <message><source>No matching music</source><translation>一致する音楽がありません</translation></message>
+    <message><source>Try another title, artist, or album.</source><translation>別のタイトル、アーティスト、アルバムを検索してください。</translation></message>
     <message><source>Search title, artist, or album</source><translation>タイトル、アーティスト、アルバムを検索</translation></message>
     <message><source>List</source><translation>リスト</translation></message>
     <message><source>Albums</source><translation>アルバム</translation></message>
-    <message><source>Title</source><translation>タイトル</translation></message>
-    <message><source>Artist</source><translation>アーティスト</translation></message>
-    <message><source>Album</source><translation>アルバム</translation></message>
     <message><source>Album artist</source><translation>アルバムアーティスト</translation></message>
     <message><source>Disc</source><translation>ディスク</translation></message>
     <message><source>Track</source><translation>曲</translation></message>
@@ -30,6 +43,8 @@
     <message><source>Unknown artist</source><translation>不明なアーティスト</translation></message>
     <message><source>iPod Library</source><translation>iPod ライブラリ</translation></message>
     <message><source>To Import</source><translation>読み込み待ち</translation></message>
+    <message><source>Import queue is empty</source><translation>読み込みキューは空です</translation></message>
+    <message><source>Add files or a folder to prepare an import.</source><translation>読み込むファイルまたはフォルダを追加してください。</translation></message>
     <message><source>Add files</source><translation>ファイルを追加</translation></message>
     <message><source>Add folder</source><translation>フォルダを追加</translation></message>
     <message><source>Remove from queue</source><translation>キューから削除</translation></message>
@@ -39,6 +54,53 @@
     <message><source>No track selected</source><translation>曲が選択されていません</translation></message>
     <message><source>Ready</source><translation>準備完了</translation></message>
     <message><source>Restore last import</source><translation>前回の読み込みを取り消す</translation></message>
+    <message><source>Restore last Library change</source><translation>前回のライブラリ変更を復元</translation></message>
+    <message><source>Restore the iPod Library and music files to their state before the last Library change?</source><translation>iPod ライブラリと音楽ファイルを前回の変更前の状態に復元しますか？</translation></message>
+    <message><source>Last Library change can be restored</source><translation>前回のライブラリ変更を復元できます</translation></message>
+    <message><source>Restore the selected iPod Library and music files to their previous state.</source><translation>選択した iPod のライブラリと音楽ファイルを以前の状態に復元します。</translation></message>
+    <message><source>Connect an iPod with a recoverable Library change.</source><translation>復元可能なライブラリ変更がある iPod を接続してください。</translation></message>
+    <message><source>Remove from iPod</source><translation>iPod から削除</translation></message>
+    <message><source>Review music removal</source><translation>音楽の削除を確認</translation></message>
+    <message><source>Reviewing selected music</source><translation>選択した音楽を確認中</translation></message>
+    <message><source>Remove {count} songs from the iPod Library?</source><translation>iPod ライブラリから {count} 曲を削除しますか？</translation></message>
+    <message><source>These songs will be removed from the entire Library and all Playlists. Original music files remain on the iPod for recovery; device space will not be freed immediately.</source><translation>これらの曲はライブラリ全体とすべてのプレイリストから削除されます。元の音楽ファイルは復元用に iPod に保持されるため、空き容量はすぐには増えません。</translation></message>
+    <message><source>Unique media retained for recovery: {size}</source><translation>復元用に保持する重複のない音楽ファイルのサイズ：{size}</translation></message>
+    <message><source>Recoverably remove {count} songs</source><translation>{count} 曲を復元可能な状態で削除</translation></message>
+    <message><source>Remove {count} songs. {size} of unique media will be retained on the iPod for recovery.</source><translation>{count} 曲を削除します。復元用に {size} の重複しない音楽ファイルを iPod に保持します。</translation></message>
+    <message><source>Affected playlists: {count}</source><translation>影響するプレイリスト: {count}</translation></message>
+    <message><source>Select at least one song to delete</source><translation>削除する曲を 1 曲以上選択してください</translation></message>
+    <message><source>The Library changed; select the songs again</source><translation>ライブラリが変更されました。曲を選び直してください</translation></message>
+    <message><source>Only music Tracks can be removed here</source><translation>ここでは音楽 Track のみ削除できます</translation></message>
+    <message><source>Restore the previous Library change before importing or deleting music</source><translation>音楽を読み込みまたは削除する前に、前回のライブラリ変更を復元してください</translation></message>
+    <message><source>The deletion review contains no changes</source><translation>削除の確認に変更がありません</translation></message>
+    <message><source>The Library could not confirm this deletion. Recovery record: {recovery}</source><translation>ライブラリで削除を確認できませんでした。復元記録: {recovery}</translation></message>
+    <message><source>Library restored</source><translation>ライブラリを復元しました</translation></message>
+    <message><source>Removed {count} songs</source><translation>{count} 曲を削除しました</translation></message>
+    <message><source>To Remove</source><translation>削除予定</translation></message>
+    <message><source>Add selection to removal package</source><translation>選択項目を削除リストに追加</translation></message>
+    <message><source>Remove package from iPod</source><translation>削除リストの曲を iPod から削除</translation></message>
+    <message><source>Title</source><translation>タイトル</translation></message>
+    <message><source>Artist</source><translation>アーティスト</translation></message>
+    <message><source>Album</source><translation>アルバム</translation></message>
+    <message><source>Genre</source><translation>ジャンル</translation></message>
+    <message><source>Year</source><translation>年</translation></message>
+    <message><source>Playlist</source><translation>プレイリスト</translation></message>
+    <message><source>Any genre</source><translation>すべてのジャンル</translation></message>
+    <message><source>Any year</source><translation>すべての年</translation></message>
+    <message><source>Any Playlist</source><translation>すべてのプレイリスト</translation></message>
+    <message><source>Missing genre</source><translation>ジャンルなし</translation></message>
+    <message><source>Missing year</source><translation>年なし</translation></message>
+    <message><source>{count} matches</source><translation>{count} 曲が一致</translation></message>
+    <message><source>To remove: {count} songs</source><translation>削除予定: {count} 曲</translation></message>
+    <message><source>Add selected to package</source><translation>選択項目を追加</translation></message>
+    <message><source>Add all matches</source><translation>一致する項目をすべて追加</translation></message>
+    <message><source>Added by filter</source><translation>追加時のフィルター</translation></message>
+    <message><source>Remove selected from package</source><translation>選択項目をリストから削除</translation></message>
+    <message><source>Clear package</source><translation>リストを空にする</translation></message>
+    <message><source>Add all matching music</source><translation>一致する曲をすべて追加</translation></message>
+    <message><source>Add all {count} matching songs to the removal package?</source><translation>一致した {count} 曲をすべて削除リストに追加しますか？</translation></message>
+    <message><source>The Library changed; rebuild the removal package</source><translation>ライブラリが変更されました。削除リストを作り直してください</translation></message>
+    <message><source>Removal was committed, but the local recovery index could not be saved: {error}. Restore is available until Classic Drop closes.</source><translation>削除は確定しましたが、ローカル復元インデックスを保存できませんでした: {error}。Classic Drop を終了するまでは復元できます。</translation></message>
     <message><source>Cancel</source><translation>キャンセル</translation></message>
     <message><source>Import selected</source><translation>選択項目を読み込む</translation></message>
     <message><source>Import {count}</source><translation>{count} を読み込む</translation></message>
@@ -46,7 +108,20 @@
     <message><source>Queued</source><translation>読み込み待ち</translation></message>
     <message><source>Already imported</source><translation>読み込み済み</translation></message>
     <message><source>Duplicate in batch</source><translation>選択内の重複</translation></message>
+    <message><source>Confirmed duplicate</source><translation>重複を確認済み</translation></message>
+    <message><source>History match</source><translation>履歴の一致</translation></message>
     <message><source>Possible duplicate</source><translation>重複の可能性</translation></message>
+    <message><source>Check incomplete</source><translation>確認未完了</translation></message>
+    <message><source>All statuses</source><translation>すべての状態</translation></message>
+    <message><source>New</source><translation>新規</translation></message>
+    <message><source>Review duplicate matches</source><translation>重複候補を確認</translation></message>
+    <message><source>{selected} songs selected; {matches} have duplicate matches or incomplete checks. Continue importing the selected songs?</source><translation>{selected} 曲を選択中です。そのうち {matches} 件に重複候補または未完了の確認があります。選択した曲を読み込みますか？</translation></message>
+    <message><source>SHA-256 matches queued file: {name}</source><translation>SHA-256 がキュー内のファイルと一致: {name}</translation></message>
+    <message><source>SHA-256 matches iPod track: {title}</source><translation>SHA-256 が iPod の曲と一致: {title}</translation></message>
+    <message><source>Could not verify matching iPod candidates: {details}</source><translation>一致候補の iPod ファイルを検証できませんでした: {details}</translation></message>
+    <message><source>Prior import receipt matches {path}; device content differs</source><translation>以前の読み込み記録は {path} と一致しますが、デバイス上の内容は異なります</translation></message>
+    <message><source>Title and artist match; duration differs by {duration} ms: {title} — {artist} — {album}</source><translation>タイトルとアーティストが一致し、長さは {duration} ミリ秒異なります: {title} — {artist} — {album}</translation></message>
+    <message><source>No matching queue item or iPod track found</source><translation>キューと iPod ライブラリに一致する項目はありません</translation></message>
     <message><source>Cannot import</source><translation>読み込めません</translation></message>
     <message><source>Import after conversion</source><translation>変換後に読み込む</translation></message>
     <message numerus="yes"><source>%n song(s)</source><translation><numerusform>%Ln 曲</numerusform></translation></message>

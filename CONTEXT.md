@@ -500,6 +500,11 @@ transaction commits and its recovery files are cleaned up (ADR-0128). General Sy
 stays disabled. Missing device-bound signing material, unsupported ArtworkDB signatures,
 pending positional sidecars, and ambiguous affected structures block preparation.
 See ADR-0021, ADR-0022, ADR-0061, and `docs/library-writing.md`.
+Classic Drop separately permits explicitly reviewed Music Track removal through
+ADR-0177. Its removal package is bound to one Active iPod, Library Snapshot, and
+database fingerprint; the single Storage Transaction retains removed media and
+prior database files on that iPod for restoration. This exception does not change
+other Library save cleanup policies.
 Preparation requests capture source and workspace revisions together. Read-only
 developer inspection exposes changes, requirements, observed stages, output
 fingerprints, and diagnostics without exposing private document bindings or granting
