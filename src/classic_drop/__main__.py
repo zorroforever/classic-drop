@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from classic_drop.window import MainWindow
+from iOpenPod.GUI.presentation.display import configure_display
 
 
 def main() -> int:
@@ -26,10 +27,10 @@ def main() -> int:
         handlers=[handler],
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    configure_display()
     app = QApplication(sys.argv)
     app.setApplicationName("Classic Drop")
     app.setOrganizationName("Classic Drop")
-    app.setStyle("Fusion")
     window = MainWindow(directory=directory)
     window.show()
     return app.exec()

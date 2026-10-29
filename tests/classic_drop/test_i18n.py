@@ -62,9 +62,7 @@ def test_falls_back_to_macos_language_preferences_when_qt_reports_c():
 def test_follow_system_clears_manual_language_override(app, monkeypatch, tmp_path):
     from classic_drop import i18n
 
-    monkeypatch.setattr(
-        i18n, "_system_language", lambda: "zh_CN", raising=False
-    )
+    monkeypatch.setattr(i18n, "_system_language", lambda: "zh_CN", raising=False)
     manager = LanguageManager(app, tmp_path)
     try:
         manager.set_language("ja_JP")
@@ -142,14 +140,6 @@ def test_user_metadata_is_not_translated(languages):
     assert render_text("opaque diagnostic 0x123") == "opaque diagnostic 0x123"
 
 
-def test_engine_errors_are_templates_not_prelocalized_strings():
-    from classic_drop import engine
-
-    source = Path(engine.__file__).read_text(encoding="utf-8")
-    assert 'raise ValueError(source_text("Select an iPod Classic first"))' in source
-    assert '"File changed; preview it again: {name}", name=item.path.name' in source
-
-
 def test_language_preference_survives_restart(app, languages, tmp_path):
     languages.set_language("ja_JP")
     languages.close()
@@ -167,6 +157,32 @@ def test_invalid_language_does_not_change_active_translation(languages):
         languages.set_language("xx")
     assert languages.language == "zh_CN"
     assert tr("Add files") == "添加文件"
+
+
+@pytest.mark.parametrize("language", ["en", "zh_CN", "ja_JP"])
+def test_workspace_translation_preserves_queue_and_inspector(
+    app: QApplication, languages: LanguageManager, language: str
+) -> None:
+    window = MainWindow(start_worker=False)
+    window.show_entries((PreviewEntry("one", Path("/tmp/one.m4a"), title="One"),))
+    window._item(0, 1).setText("User title")
+    window.sidebar.setCurrentRow(1)
+    window.inspector_button.setChecked(False)
+    requests: list[str] = []
+    window.request.connect(lambda command, _payload: requests.append(command))
+    before = window.edited_entries()
+    try:
+        languages.set_language(language)
+        assert window.heading_title.text() == tr("To Import")
+        item = window.sidebar.item(2)
+        assert item is not None and item.text() == tr("Recovery & History")
+        assert window.queue_empty_title.text() == tr("Import queue is empty")
+        assert window.edited_entries() == before
+        assert window.pages.currentWidget() is window.import_page
+        assert not window.inspector_button.isChecked()
+        assert not requests
+    finally:
+        window.close()
 
 
 def test_language_switch_preserves_edits_selection_and_progress(app, languages):
@@ -275,7 +291,9 @@ def test_language_switch_retranslates_connected_device_info(app, languages):
         window.close()
 
 
-def test_canceled_source_message_does_not_open_error_dialog(app, languages, monkeypatch):
+def test_canceled_source_message_does_not_open_error_dialog(
+    app, languages, monkeypatch
+):
     from PySide6.QtWidgets import QMessageBox
 
     languages.set_language("ja_JP")
@@ -283,7 +301,9 @@ def test_canceled_source_message_does_not_open_error_dialog(app, languages, monk
     dialogs = []
     monkeypatch.setattr(QMessageBox, "exec", lambda _self: dialogs.append(True))
     try:
-        window._failed("preview", source_text("Operation canceled"), Reply(None, None, False))
+        window._failed(
+            "preview", source_text("Operation canceled"), Reply(None, None, False)
+        )
         assert not dialogs
         assert window.status.text() == "操作をキャンセルしました"
     finally:

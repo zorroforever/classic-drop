@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtGui import QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from classic_drop.i18n import song_count, tr
@@ -77,9 +77,7 @@ class AlbumCardDelegate(QStyledItemDelegate):
     ) -> None:
         super().__init__(parent)
         self._request_artwork = request_artwork
-        self._placeholder = glyph_icon("album", 110, QColor("#899497")).pixmap(
-            QSize(110, 110)
-        )
+        self._placeholders: dict[int, QPixmap] = {}
 
     def sizeHint(
         self,
@@ -101,8 +99,17 @@ class AlbumCardDelegate(QStyledItemDelegate):
         rect = option.rect.adjusted(4, 4, -4, -4)
         painter.save()
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        painter.setPen(QColor("#9bb8b1") if selected else QColor("#d9dfe1"))
-        painter.setBrush(QColor("#e6f0ed") if selected else QColor("#ffffff"))
+        palette = option.palette
+        painter.setPen(
+            palette.color(
+                QPalette.ColorRole.Highlight if selected else QPalette.ColorRole.Mid
+            )
+        )
+        painter.setBrush(
+            palette.color(
+                QPalette.ColorRole.Highlight if selected else QPalette.ColorRole.Base
+            )
+        )
         painter.drawRoundedRect(rect, 5, 5)
 
         artwork_rect = QRect(rect.x() + 16, rect.y() + 12, rect.width() - 32, 142)
@@ -122,15 +129,26 @@ class AlbumCardDelegate(QStyledItemDelegate):
             if summary.artwork_id > 0:
                 self._request_artwork(summary.artwork_id)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#eef1f2"))
+            painter.setBrush(palette.color(QPalette.ColorRole.AlternateBase))
             painter.drawRect(artwork_rect)
+            color = palette.color(QPalette.ColorRole.PlaceholderText)
+            placeholder = self._placeholders.get(color.rgba())
+            if placeholder is None:
+                placeholder = glyph_icon("album", 110, color).pixmap(QSize(110, 110))
+                self._placeholders[color.rgba()] = placeholder
             painter.drawPixmap(
-                artwork_rect.center().x() - self._placeholder.width() // 2,
-                artwork_rect.center().y() - self._placeholder.height() // 2,
-                self._placeholder,
+                artwork_rect.center().x() - placeholder.width() // 2,
+                artwork_rect.center().y() - placeholder.height() // 2,
+                placeholder,
             )
 
-        painter.setPen(QColor("#24282a"))
+        painter.setPen(
+            palette.color(
+                QPalette.ColorRole.HighlightedText
+                if selected
+                else QPalette.ColorRole.Text
+            )
+        )
         title_rect = QRect(
             rect.x() + 9, artwork_rect.bottom() + 10, rect.width() - 18, 38
         )
@@ -143,7 +161,13 @@ class AlbumCardDelegate(QStyledItemDelegate):
             ),
             summary.title or tr("Unknown album"),
         )
-        painter.setPen(QColor("#697377"))
+        painter.setPen(
+            palette.color(
+                QPalette.ColorRole.HighlightedText
+                if selected
+                else QPalette.ColorRole.PlaceholderText
+            )
+        )
         detail = summary.artist
         if summary.year:
             detail = f"{detail}  ·  {summary.year}" if detail else str(summary.year)

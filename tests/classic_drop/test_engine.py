@@ -4,7 +4,7 @@ from threading import Event
 import pytest
 
 from classic_drop.engine import ClassicDropEngine, OperationCancelledError
-from iOpenPod.app.display_text import source_text
+from iOpenPod.app.display_text import SourceText, source_text
 from iPodDB.iTunesDB.writer.signature import verify_hash58
 from iPodDB.library import CoverFormat, CoverPixelFormat, IPodLibrary
 from tests.classic_drop.test_media import media_file
@@ -40,7 +40,9 @@ def test_selection_and_preview_do_not_write_the_device(connected, tmp_path):
     } == before
 
 
-def test_preview_preserves_translatable_error_template(connected, tmp_path, monkeypatch):
+def test_preview_preserves_translatable_error_template(
+    connected, tmp_path, monkeypatch
+):
     _device, engine = connected
     source = media_file(tmp_path)
 
@@ -117,8 +119,12 @@ def test_changed_source_cannot_publish_library(connected, tmp_path):
     source = media_file(tmp_path)
     entries = engine.preview((source,), Event())
     source.write_bytes(source.read_bytes() + b"changed")
-    with pytest.raises(ValueError, match=r"changed|Changed|match|改变|变化"):
+    with pytest.raises(ValueError) as captured:
         engine.commit(entries, Event())
+    message = captured.value.args[0]
+    assert isinstance(message, SourceText)
+    assert message.source == "File changed; preview it again: {name}"
+    assert message.parameters == (("name", source.name),)
     device.assert_original()
 
 

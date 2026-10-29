@@ -106,11 +106,7 @@ class LanguageManager(QObject):
         self._follows_system = not (
             isinstance(saved, str) and saved in SUPPORTED_LANGUAGES
         )
-        self._language = (
-            _system_language()
-            if self._follows_system
-            else str(saved)
-        )
+        self._language = _system_language() if self._follows_system else str(saved)
         self._install(self._language, emit=False)
 
     @property

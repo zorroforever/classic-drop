@@ -3,6 +3,16 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>ClassicDrop</name>
+    <message><source>Workspaces</source><translation>工作区</translation></message>
+    <message><source>Current iPod</source><translation>当前 iPod</translation></message>
+    <message><source>Toggle inspector</source><translation>显示或隐藏检查器</translation></message>
+    <message><source>Recovery &amp; History</source><translation>恢复与记录</translation></message>
+    <message><source>Last import can be restored</source><translation>可以恢复上次导入</translation></message>
+    <message><source>No recovery available</source><translation>没有可用的恢复记录</translation></message>
+    <message><source>Restore the selected iPod to its state before the last import.</source><translation>将所选 iPod 恢复至上次导入前的状态。</translation></message>
+    <message><source>Connect an iPod with a recoverable import to restore its Library.</source><translation>连接具有可恢复导入记录的 iPod，即可恢复其曲库。</translation></message>
+    <message><source>{count} selected</source><translation>已选择 {count}</translation></message>
+    <message><source>Quit Classic Drop</source><translation>退出 Classic Drop</translation></message>
     <message><source>More</source><translation>更多</translation></message>
     <message><source>Settings</source><translation>设置</translation></message>
     <message><source>General</source><translation>通用</translation></message>
@@ -15,6 +25,12 @@
     <message><source>Refresh devices</source><translation>刷新设备</translation></message>
     <message><source>Safely eject</source><translation>安全弹出</translation></message>
     <message><source>No device connected</source><translation>未连接设备</translation></message>
+    <message><source>No iPod connected</source><translation>未连接 iPod</translation></message>
+    <message><source>Connect an iPod Classic to view its Library.</source><translation>连接 iPod Classic 后即可查看曲库。</translation></message>
+    <message><source>No music on this iPod</source><translation>此 iPod 中没有音乐</translation></message>
+    <message><source>The selected iPod Library contains no tracks.</source><translation>所选 iPod 曲库中没有歌曲。</translation></message>
+    <message><source>No matching music</source><translation>没有匹配的音乐</translation></message>
+    <message><source>Try another title, artist, or album.</source><translation>请尝试其他标题、艺人或专辑。</translation></message>
     <message><source>Search title, artist, or album</source><translation>搜索标题、艺人或专辑</translation></message>
     <message><source>List</source><translation>列表</translation></message>
     <message><source>Albums</source><translation>专辑</translation></message>
@@ -30,6 +46,8 @@
     <message><source>Unknown artist</source><translation>未知艺人</translation></message>
     <message><source>iPod Library</source><translation>iPod 曲库</translation></message>
     <message><source>To Import</source><translation>待导入</translation></message>
+    <message><source>Import queue is empty</source><translation>导入队列为空</translation></message>
+    <message><source>Add files or a folder to prepare an import.</source><translation>添加文件或文件夹以准备导入。</translation></message>
     <message><source>Add files</source><translation>添加文件</translation></message>
     <message><source>Add folder</source><translation>添加文件夹</translation></message>
     <message><source>Remove from queue</source><translation>移出队列</translation></message>

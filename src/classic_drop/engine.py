@@ -109,7 +109,9 @@ class ClassicDropEngine:
             or candidate.profile is None
             or candidate.profile.family != "iPod Classic"
         ):
-            raise ValueError(source_text("Only stock-firmware iPod Classic is supported"))
+            raise ValueError(
+                source_text("Only stock-firmware iPod Classic is supported")
+            )
         if candidate.readiness not in (
             DeviceReadiness.READY,
             DeviceReadiness.SYNC_RECOVERY_REQUIRED,
@@ -138,7 +140,9 @@ class ClassicDropEngine:
         ):
             self.coordinator.close()
             raise ValueError(
-                source_text("Device artwork database is unreadable; restore a library backup first")
+                source_text(
+                    "Device artwork database is unreadable; restore a library backup first"
+                )
             )
         return active
 
@@ -179,13 +183,17 @@ class ClassicDropEngine:
                     seen.add(self._songs[entry.token].original.sha256)
                 continue
             self.progress(
-                WriteProgress("inspect", "Inspecting music", index, len(sources), path.name)
+                WriteProgress(
+                    "inspect", "Inspecting music", index, len(sources), path.name
+                )
             )
             token = uuid4().hex
             try:
                 if path.resolve().is_relative_to(device_root):
                     raise ValueError(
-                        source_text("Choose music from this Mac, not from the iPod itself")
+                        source_text(
+                            "Choose music from this Mac, not from the iPod itself"
+                        )
                     )
                 prepared = prepare_song(
                     path, active.profile, self._resources, checkpoint
@@ -251,7 +259,9 @@ class ClassicDropEngine:
         checkpoint()
         active = self.active
         if active is not self._preview_active:
-            raise ValueError(source_text("The device or library changed; preview again"))
+            raise ValueError(
+                source_text("The device or library changed; preview again")
+            )
         selected = tuple(e for e in entries if e.selected)
         if not selected:
             raise ValueError(source_text("Select at least one song to import"))
@@ -260,13 +270,17 @@ class ClassicDropEngine:
             checkpoint()
             item = self._songs.get(entry.token)
             if item is None or entry.path != item.path:
-                raise ValueError(source_text("The preview expired; select the files again"))
+                raise ValueError(
+                    source_text("The preview expired; select the files again")
+                )
             if (
                 not entry.title.strip()
                 or min(entry.track_number, entry.disc_number) < 0
             ):
                 raise ValueError(
-                    source_text("A title is required and track and disc numbers cannot be negative")
+                    source_text(
+                        "A title is required and track and disc numbers cannot be negative"
+                    )
                 )
             with capture_host_file(
                 HostPath(item.path), checkpoint=checkpoint
@@ -274,7 +288,8 @@ class ClassicDropEngine:
                 if source.fingerprint.sha256 != item.original.sha256:
                     raise ValueError(
                         source_text(
-                            "File changed; preview it again: {name}", name=item.path.name
+                            "File changed; preview it again: {name}",
+                            name=item.path.name,
                         )
                     )
             prepared.append((entry, item))
@@ -330,7 +345,8 @@ class ClassicDropEngine:
                 source_text(
                     "{issues}",
                     issues="\n".join(
-                        f"{i.code}: {i.message} {i.detail}" for i in review.result.issues
+                        f"{i.code}: {i.message} {i.detail}"
+                        for i in review.result.issues
                     ),
                 )
             )
@@ -339,7 +355,9 @@ class ClassicDropEngine:
             f.action != "write" or f.path in retained_paths for f in review.file_changes
         ):
             raise ValueError(
-                source_text("Append-only import cannot delete or overwrite retained music")
+                source_text(
+                    "Append-only import cannot delete or overwrite retained music"
+                )
             )
         checkpoint()
         result = self.coordinator.save_library(

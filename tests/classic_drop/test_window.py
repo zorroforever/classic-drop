@@ -2,7 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
 from classic_drop.engine import ImportResult, PreviewEntry
@@ -256,8 +257,6 @@ def test_album_artwork_result_updates_grid_and_open_detail(app):
 
 
 def test_classic_drop_button_glyphs_render_visible_pixels(app):
-    from PySide6.QtCore import QSize
-    from PySide6.QtGui import QColor
 
     from iOpenPod.GUI.presentation.icons import glyph_icon
 

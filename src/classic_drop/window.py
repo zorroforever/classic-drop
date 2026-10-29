@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import (
-    QModelIndex,
-    QPersistentModelIndex,
+    QEvent,
     QSize,
     Qt,
     QThread,
@@ -17,51 +16,37 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
+    QAction,
     QActionGroup,
     QCloseEvent,
-    QColor,
     QDesktopServices,
     QDragEnterEvent,
     QDropEvent,
-    QFont,
     QImage,
+    QKeySequence,
+    QPalette,
     QPixmap,
+    QResizeEvent,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView,
+    QAbstractButton,
     QApplication,
-    QButtonGroup,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QSizePolicy,
-    QSpinBox,
-    QSplitter,
-    QStackedWidget,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
-    QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QToolButton,
-    QVBoxLayout,
-    QWidget,
 )
 
 from classic_drop.albums import (
     ALBUM_ROLE,
     ARTWORK_ROLE,
-    AlbumCardDelegate,
     AlbumSummary,
     group_albums,
 )
@@ -73,6 +58,10 @@ from classic_drop.i18n import (
     song_count,
     tr,
 )
+from classic_drop.import_view import ImportView
+from classic_drop.library_view import LibraryCell, LibraryView
+from classic_drop.presentation import STYLE, tool
+from classic_drop.shell import WorkspaceShell
 from classic_drop.worker import Reply, Worker
 from iOpenPod.app.display_text import SourceText, source_text
 from iOpenPod.app.library_write import WriteProgress
@@ -90,40 +79,12 @@ STATUS = {
 }
 
 
-def button(text: str, glyph: str) -> QPushButton:
-    result = QPushButton(text)
-    result.setIcon(glyph_icon(glyph, 18, QColor("#30383b")))
-    result.setMinimumHeight(32)
-    return result
-
-
-def tool(name: str, glyph: str) -> QToolButton:
-    result = QToolButton()
-    result.setIcon(glyph_icon(glyph, 19, QColor("#30383b")))
-    result.setToolTip(name)
-    result.setAccessibleName(name)
-    result.setFixedSize(32, 32)
-    return result
-
-
 def readable_size(size: int) -> str:
     return (
         f"{size / (1024**3):.1f} GB"
         if size >= 1024**3
         else f"{size / (1024**2):.1f} MB"
     )
-
-
-class NumberDelegate(QStyledItemDelegate):
-    def createEditor(
-        self,
-        parent: QWidget,
-        option: QStyleOptionViewItem,
-        index: QModelIndex | QPersistentModelIndex,
-    ) -> QWidget:
-        editor = QSpinBox(parent)
-        editor.setRange(0, 9999)
-        return editor
 
 
 class MainWindow(QMainWindow):
@@ -139,7 +100,7 @@ class MainWindow(QMainWindow):
         self._language_manager = get_language_manager(application, directory)
         self._language_manager.languageChanged.connect(self._language_changed)
         self.setWindowTitle("Classic Drop")
-        self.resize(1180, 720)
+        self.resize(1180, 760)
         self.setMinimumSize(940, 580)
         self.setAcceptDrops(True)
         self._entries: tuple[PreviewEntry, ...] = ()
@@ -154,6 +115,7 @@ class MainWindow(QMainWindow):
         self._album_artwork: dict[int, QPixmap] = {}
         self._artwork_requests: set[int] = set()
         self._open_album_summary: AlbumSummary | None = None
+        self._inspector_artwork_id = 0
         self._device_placeholder = "No iPod Classic connected"
         self._status_message: str = "Ready"
         self._current_progress: WriteProgress | None = None
@@ -178,20 +140,70 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.refresh)
 
     def _build(self) -> None:
-        root = QWidget()
-        self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(14)
-        heading = QHBoxLayout()
-        title = QLabel("Classic Drop")
-        self.heading_title = title
-        font = QFont()
-        font.setPointSize(21)
-        font.setWeight(QFont.Weight.DemiBold)
-        title.setFont(font)
-        heading.addWidget(title)
-        heading.addStretch()
+        self.shell = WorkspaceShell()
+        self.setCentralWidget(self.shell)
+        self.library_view = LibraryView(self)
+        self.import_view = ImportView(self)
+        self.library_page = self.library_view
+        self.import_page = self.import_view
+        self.library_search = self.library_view.library_search
+        self.library_count = self.library_view.library_count
+        self.list_mode_button = self.library_view.list_mode_button
+        self.album_mode_button = self.library_view.album_mode_button
+        self.library_table = self.library_view.library_table
+        self.library_stack = self.library_view.library_stack
+        self.library_list_page = self.library_view.library_list_page
+        self.library_album_page = self.library_view.library_album_page
+        self.album_detail_stack = self.library_view.album_detail_stack
+        self.album_grid = self.library_view.album_grid
+        self.album_detail_page = self.library_view.album_detail_page
+        self.back_button = self.library_view.back_button
+        self.album_detail_cover = self.library_view.album_detail_cover
+        self.album_detail_title = self.library_view.album_detail_title
+        self.album_detail_meta = self.library_view.album_detail_meta
+        self.album_track_table = self.library_view.album_track_table
+        self.files_button = self.import_view.files_button
+        self.folder_button = self.import_view.folder_button
+        self.remove_button = self.import_view.remove_button
+        self.count_label = self.import_view.count_label
+        self.table = self.import_view.table
+        self.queue_stack = self.import_view.queue_stack
+        self.queue_details = self.import_view.queue_details
+        self.cover = self.import_view.cover
+        self.cover_button = self.import_view.cover_button
+        self.clear_cover_button = self.import_view.clear_cover_button
+        self.track_title = self.import_view.track_title
+        self.track_details = self.import_view.track_details
+        self.source_label = self.import_view.source_label
+        self.library_empty_page = self.library_view.library_empty_page
+        self.library_empty_title = self.library_view.library_empty_title
+        self.library_empty_detail = self.library_view.library_empty_detail
+        self.queue_empty_page = self.import_view.queue_empty_page
+        self.queue_empty_title = self.import_view.queue_empty_title
+        self.queue_empty_detail = self.import_view.queue_empty_detail
+        self.library_inspector_title = self.library_view.inspector_title
+        self.library_inspector_details = self.library_view.inspector_details
+        self.inspector_stack = self.shell.inspectors
+        self.inspector_stack.addWidget(self.library_view.inspector)
+        self.inspector_stack.addWidget(self.queue_details)
+        self.pages = self.shell.pages
+        self.recovery_page = self.shell.recovery_page
+        self.pages.addWidget(self.library_page)
+        self.pages.addWidget(self.import_page)
+        self.pages.addWidget(self.recovery_page)
+        self.sidebar = self.shell.sidebar
+        self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.pages.currentChanged.connect(self._workspace_changed)
+        self.heading_title = self.shell.title
+        self.toolbar = self.shell.toolbar
+        self.library_view.library_search.setMaximumWidth(280)
+        self.library_view.library_search.setMinimumWidth(160)
+        self.library_controls_action = self.toolbar.addWidget(
+            self.library_view.controls
+        )
+        self.inspector_button = self.shell.inspector_button
+        self.inspector_button.toggled.connect(self._set_inspector_visible)
+        self.toolbar.addWidget(self.inspector_button)
         self.settings_button = tool("Settings", "settings-sliders")
         menu = QMenu(self.settings_button)
         self.backups_action = menu.addAction("Show backups and logs", self._reveal_data)
@@ -219,9 +231,15 @@ class MainWindow(QMainWindow):
             self.language_actions[language] = action
         self.settings_button.setMenu(menu)
         self.settings_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        heading.addWidget(self.settings_button)
-        layout.addLayout(heading)
-
+        menu.setTitle("Classic Drop")
+        self.menuBar().addMenu(menu)
+        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+        self.quit_action = menu.addAction("Quit Classic Drop", self.close)
+        self.quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+        self.quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        self.toolbar.addWidget(self.settings_button)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
+        self.setUnifiedTitleAndToolBarOnMac(True)
         device_row = QHBoxLayout()
         self.devices = QComboBox()
         self.devices.setMinimumHeight(34)
@@ -234,258 +252,161 @@ class MainWindow(QMainWindow):
         self.eject_button = tool("Safely eject", "eject")
         self.eject_button.clicked.connect(lambda: self._submit("eject"))
         device_row.addWidget(self.eject_button)
-        layout.addLayout(device_row)
+        self.shell.device_layout.addLayout(device_row)
         self.device_info = QLabel("No device connected")
         self.device_info.setObjectName("muted")
         self.device_info.setWordWrap(True)
-        layout.addWidget(self.device_info)
+        self.shell.device_layout.addWidget(self.device_info)
 
-        self.tabs = QTabWidget()
-        self.library_page = QWidget()
-        library_layout = QVBoxLayout(self.library_page)
-        library_toolbar = QHBoxLayout()
-        self.library_search = QLineEdit()
-        self.library_search.setPlaceholderText("Search title, artist, or album")
-        self.library_search.textChanged.connect(self._filter_library)
-        library_toolbar.addWidget(self.library_search, 1)
-        self.library_count = QLabel("0 songs")
-        self.library_count.setObjectName("muted")
-        library_toolbar.addWidget(self.library_count)
-        library_layout.addLayout(library_toolbar)
-        mode_group = QButtonGroup(self)
-        mode_group.setExclusive(True)
-        self.list_mode_button = QToolButton()
-        self.list_mode_button.setText("List")
-        self.list_mode_button.setCheckable(True)
-        self.album_mode_button = QToolButton()
-        self.album_mode_button.setText("Albums")
-        self.album_mode_button.setCheckable(True)
-        mode_group.addButton(self.list_mode_button)
-        mode_group.addButton(self.album_mode_button)
-        self.list_mode_button.setChecked(True)
-        self.list_mode_button.clicked.connect(lambda: self._set_library_mode("list"))
-        self.album_mode_button.clicked.connect(lambda: self._set_library_mode("album"))
-        library_toolbar.insertWidget(0, self.list_mode_button)
-        library_toolbar.insertWidget(1, self.album_mode_button)
-        self.library_table = QTableWidget(0, 7)
-        self.library_table.setHorizontalHeaderLabels(
-            ["Title", "Artist", "Album", "Album artist", "Disc", "Track", "Duration"]
-        )
-        self.library_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.library_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.library_table.setAlternatingRowColors(True)
-        self.library_table.setShowGrid(False)
-        self.library_table.verticalHeader().hide()
-        for column, width in enumerate((190, 130, 180, 130, 45, 45, 70)):
-            self.library_table.setColumnWidth(column, width)
-        self.library_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
-        self.library_stack = QStackedWidget()
-        list_page = QWidget()
-        list_layout = QVBoxLayout(list_page)
-        list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.addWidget(self.library_table)
-        self.library_stack.addWidget(list_page)
-        album_page = QWidget()
-        album_layout = QVBoxLayout(album_page)
-        album_layout.setContentsMargins(0, 0, 0, 0)
-        self.album_detail_stack = QStackedWidget()
-        self.album_grid = QListWidget()
-        self.album_grid.setViewMode(QListWidget.ViewMode.IconMode)
-        self.album_grid.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.album_grid.setMovement(QListWidget.Movement.Static)
-        self.album_grid.setSpacing(10)
-        self.album_grid.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
-        )
-        self.album_grid.setUniformItemSizes(True)
-        self.album_grid.setItemDelegate(
-            AlbumCardDelegate(self._request_artwork, self.album_grid)
-        )
-        self.album_grid.itemDoubleClicked.connect(self._open_album)
-        self.album_detail_stack.addWidget(self.album_grid)
-        self.album_detail_page = QWidget()
-        album_detail_row = QHBoxLayout(self.album_detail_page)
-        album_detail_row.setContentsMargins(8, 8, 8, 8)
-        detail_left = QVBoxLayout()
-        self.back_button = button("Back to albums", "skip-back")
-        self.back_button.clicked.connect(
-            lambda: self.album_detail_stack.setCurrentWidget(self.album_grid)
-        )
-        detail_left.addWidget(self.back_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.album_detail_cover = QLabel()
-        self.album_detail_cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.album_detail_cover.setFixedSize(240, 240)
-        self.album_detail_cover.setObjectName("cover")
-        detail_left.addWidget(self.album_detail_cover)
-        self.album_detail_title = QLabel()
-        self.album_detail_title.setWordWrap(True)
-        self.album_detail_title.setFont(QFont("", 15, QFont.Weight.DemiBold))
-        detail_left.addWidget(self.album_detail_title)
-        self.album_detail_meta = QLabel()
-        self.album_detail_meta.setWordWrap(True)
-        self.album_detail_meta.setObjectName("muted")
-        detail_left.addWidget(self.album_detail_meta)
-        detail_left.addStretch()
-        album_detail_row.addLayout(detail_left, 0)
-        self.album_track_table = QTableWidget(0, 4)
-        self.album_track_table.setHorizontalHeaderLabels(
-            ["Track", "Title", "Artist", "Duration"]
-        )
-        self.album_track_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.album_track_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
-        )
-        self.album_track_table.setAlternatingRowColors(True)
-        self.album_track_table.setShowGrid(False)
-        self.album_track_table.verticalHeader().hide()
-        self.album_track_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
-        album_detail_row.addWidget(self.album_track_table, 1)
-        self.album_detail_stack.addWidget(self.album_detail_page)
-        album_layout.addWidget(self.album_detail_stack)
-        self.library_stack.addWidget(album_page)
-        library_layout.addWidget(self.library_stack, 1)
-        self.tabs.addTab(self.library_page, "iPod Library")
-
-        self.import_page = QWidget()
-        import_layout = QVBoxLayout(self.import_page)
-        toolbar = QHBoxLayout()
-        self.files_button = button("Add files", "plus")
-        self.files_button.clicked.connect(self._choose_files)
-        self.folder_button = button("Add folder", "folder")
-        self.folder_button.clicked.connect(self._choose_folder)
-        self.remove_button = tool("Remove from queue", "minus")
-        self.remove_button.clicked.connect(self._remove)
-        toolbar.addWidget(self.files_button)
-        toolbar.addWidget(self.folder_button)
-        toolbar.addWidget(self.remove_button)
-        toolbar.addStretch()
-        self.count_label = QLabel("0 songs")
-        self.count_label.setObjectName("muted")
-        toolbar.addWidget(self.count_label)
-        import_layout.addLayout(toolbar)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(
-            ["", "Title", "Artist", "Album", "Album artist", "Disc", "Track", "Status"]
-        )
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setAlternatingRowColors(True)
-        self.table.setShowGrid(False)
-        self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(40)
-        self.table.horizontalHeader().setMinimumSectionSize(34)
-        for column, width in enumerate((34, 175, 110, 140, 110, 40, 40, 105)):
-            self.table.setColumnWidth(column, width)
-        self.table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
-        self.table.setItemDelegateForColumn(5, NumberDelegate(self.table))
-        self.table.setItemDelegateForColumn(6, NumberDelegate(self.table))
-        self.table.itemSelectionChanged.connect(self._selection_changed)
-        self.table.itemChanged.connect(self._queue_changed)
-        splitter.addWidget(self.table)
-        details = QWidget()
-        details.setMinimumWidth(210)
-        details.setMaximumWidth(280)
-        detail_layout = QVBoxLayout(details)
-        detail_layout.setContentsMargins(12, 0, 0, 0)
-        self.cover = QLabel()
-        self.cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover.setFixedSize(200, 200)
-        self.cover.setObjectName("cover")
-        detail_layout.addWidget(self.cover)
-        cover_actions = QHBoxLayout()
-        self.cover_button = button("Choose cover", "photo")
-        self.cover_button.clicked.connect(self._choose_cover)
-        cover_actions.addWidget(self.cover_button)
-        self.clear_cover_button = tool("Remove cover", "x")
-        self.clear_cover_button.clicked.connect(self._clear_cover)
-        cover_actions.addWidget(self.clear_cover_button)
-        cover_actions.addStretch()
-        detail_layout.addLayout(cover_actions)
-        self.track_title = QLabel("No track selected")
-        self.track_title.setWordWrap(True)
-        self.track_title.setFont(QFont("", 14, QFont.Weight.DemiBold))
-        detail_layout.addWidget(self.track_title)
-        self.track_details = QLabel()
-        self.track_details.setWordWrap(True)
-        self.track_details.setObjectName("muted")
-        detail_layout.addWidget(self.track_details)
-        detail_layout.addStretch()
-        self.source_label = QLabel()
-        self.source_label.setWordWrap(True)
-        self.source_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        self.source_label.setObjectName("muted")
-        self.source_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        detail_layout.addWidget(self.source_label)
-        splitter.addWidget(details)
-        splitter.setStretchFactor(0, 1)
-        splitter.setSizes([850, 230])
-        import_layout.addWidget(splitter, 1)
-        self.tabs.addTab(self.import_page, "To Import")
-        layout.addWidget(self.tabs, 1)
-
-        self.progress = QProgressBar()
-        self.progress.setFixedHeight(5)
-        self.progress.setTextVisible(False)
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        layout.addWidget(self.progress)
-        footer = QHBoxLayout()
-        self.status = QLabel("Ready")
-        self.status.setWordWrap(True)
-        self.status.setMinimumHeight(40)
-        footer.addWidget(self.status, 1)
-        self.restore_button = button("Restore last import", "skip-back")
+        self.progress = self.shell.progress
+        self.status = self.shell.status
+        self.restore_button = self.shell.restore_button
         self.restore_button.clicked.connect(self._restore)
-        footer.addWidget(self.restore_button)
-        self.cancel_button = button("Cancel", "x")
+        self.shell.logs_button.clicked.connect(self._reveal_data)
+        self.cancel_button = self.shell.cancel_button
         self.cancel_button.clicked.connect(self._cancel)
-        footer.addWidget(self.cancel_button)
-        self.import_button = button("Import selected", "music")
-        self.import_button.setObjectName("primary")
+        self.import_button = self.shell.import_button
         self.import_button.clicked.connect(self._commit)
-        footer.addWidget(self.import_button)
-        layout.addLayout(footer)
-        self.setStyleSheet("""
-            QMainWindow, QWidget { background: #f5f6f7; color: #24282a; }
-            QLabel#muted { color: #697377; font-size: 12px; }
-            QPushButton, QToolButton, QComboBox {
-                background: #ffffff; border: 1px solid #d5dadc;
-                border-radius: 5px; padding: 4px 9px;
-            }
-            QToolButton { padding: 4px; }
-            QPushButton:hover, QToolButton:hover { background: #eaf0f0; }
-            QPushButton:disabled, QToolButton:disabled, QComboBox:disabled { color: #a2aaad; }
-            QPushButton#primary { background: #15685b; border-color: #15685b; color: white; font-weight: 600; }
-            QPushButton#primary:disabled { background: #d5dfdc; border-color: #d5dfdc; color: #899792; }
-            QTableWidget { background: #ffffff; alternate-background-color: #f7f9f9;
-                border: 1px solid #d9dfe1; selection-background-color: #d8ece6; selection-color: #193d33; }
-            QHeaderView::section { background: #edf0f1; padding: 8px 4px; border: 0;
-                border-bottom: 1px solid #d9dfe1; color: #596368; font-size: 12px; }
-            QProgressBar { border: 0; background: #e0e5e6; border-radius: 2px; }
-            QProgressBar::chunk { background: #248271; border-radius: 2px; }
-            QLabel#cover { background: #e8ecee; border: 1px solid #dce2e4; }
-            QMenu { background: white; }
-        """)
+        self.library_table.itemSelectionChanged.connect(self._library_selection_changed)
+        self.album_grid.itemSelectionChanged.connect(self._library_selection_changed)
+        self.library_table.model().layoutChanged.connect(
+            lambda: self._filter_library(self.library_search.text())
+        )
+        self.setStyleSheet(STYLE)
+        self._find_action = QAction(self)
+        self._find_action.setShortcut(QKeySequence.StandardKey.Find)
+        self._find_action.triggered.connect(self.library_search.setFocus)
+        self.addAction(self._find_action)
+        self._open_action = QAction(self)
+        self._open_action.setShortcut(QKeySequence.StandardKey.Open)
+        self._open_action.triggered.connect(self._choose_files)
+        self.addAction(self._open_action)
+        self._remove_shortcut = QShortcut(
+            QKeySequence(Qt.Key.Key_Backspace), self.table
+        )
+        self._remove_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self._remove_shortcut.activated.connect(self._remove)
+        self._compact = False
+        self.sidebar.setCurrentRow(0)
         self._show_cover(None)
         self._set_status("Ready")
         self._sync_language_actions()
         self._retranslate_ui()
+        self._library_selection_changed()
+
+    def _workspace_changed(self, index: int) -> None:
+        self.sidebar.blockSignals(True)
+        self.sidebar.setCurrentRow(index)
+        self.sidebar.blockSignals(False)
+        self.heading_title.setText(
+            tr(("iPod Library", "To Import", "Recovery & History")[index])
+        )
+        self.library_controls_action.setVisible(index == 0)
+        self.inspector_button.setEnabled(index != 2)
+        self._set_inspector_visible(self.inspector_button.isChecked())
+        if index < 2:
+            self.inspector_stack.setCurrentIndex(index)
+        self.import_button.setVisible(index == 1)
+        self._find_action.setEnabled(index == 0)
+
+    def _set_inspector_visible(self, visible: bool) -> None:
+        self.inspector_stack.setVisible(visible and self.pages.currentIndex() != 2)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "inspector_button"):
+            compact = self.width() < 1080
+            if compact != self._compact:
+                self._compact = compact
+                self.inspector_button.setChecked(not compact)
+
+    def _library_selection_changed(self) -> None:
+        if self.album_mode_button.isChecked():
+            items = self.album_grid.selectedItems()
+            item = items[0] if items else None
+            album = (
+                item.data(ALBUM_ROLE)
+                if item is not None and not item.isHidden()
+                else None
+            )
+            self._inspector_artwork_id = 0
+            if isinstance(album, AlbumSummary):
+                self.library_inspector_title.setText(album.title or tr("Unknown album"))
+                self.library_inspector_details.setText(
+                    "\n".join((album.artist, song_count(album.track_count)))
+                )
+                self._inspector_artwork_id = album.artwork_id
+            else:
+                self.library_inspector_title.setText(tr("No track selected"))
+                self.library_inspector_details.clear()
+            self._update_library_inspector_cover()
+            return
+        rows = [
+            item.row()
+            for item in self.library_table.selectionModel().selectedRows()
+            if not self.library_table.isRowHidden(item.row())
+        ]
+        self._inspector_artwork_id = 0
+        details = ""
+        track = self.library_view.track_at(rows[0]) if len(rows) == 1 else None
+        if track is not None:
+            title = track.title
+            duration = f"{max(0, track.length_ms) // 60000}:{max(0, track.length_ms) // 1000 % 60:02d}"
+            details = "\n".join((track.artist, track.album, duration))
+            self._inspector_artwork_id = track.artwork_id
+        elif rows:
+            title = tr("{count} selected").format(count=song_count(len(rows)))
+        else:
+            title = tr("No track selected")
+        self.library_inspector_title.setText(title)
+        self.library_inspector_details.setText(details)
+        self._update_library_inspector_cover()
+
+    def _update_library_inspector_cover(self) -> None:
+        cover = self.library_view.inspector_cover
+        pixmap = self._album_artwork.get(self._inspector_artwork_id)
+        if pixmap is None:
+            cover.setPixmap(
+                glyph_icon(
+                    "album",
+                    100,
+                    self.palette().color(QPalette.ColorRole.PlaceholderText),
+                ).pixmap(QSize(100, 100))
+            )
+            self._request_artwork(self._inspector_artwork_id)
+        else:
+            cover.setPixmap(
+                pixmap.scaled(
+                    238,
+                    238,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() in (
+            QEvent.Type.ApplicationPaletteChange,
+            QEvent.Type.PaletteChange,
+        ) and hasattr(self, "import_button"):
+            self._retint_glyph_icons()
+            self._selection_changed()
+            self._update_library_inspector_cover()
+            if (
+                self._open_album_summary is not None
+                and self._open_album_summary.artwork_id not in self._album_artwork
+            ):
+                self.album_detail_cover.setPixmap(self._album_placeholder())
+            self.album_grid.viewport().update()
+
+    def _retint_glyph_icons(self) -> None:
+        color = self.palette().color(QPalette.ColorRole.ButtonText)
+        for widget in self.findChildren(QAbstractButton):
+            glyph = widget.property("classicDropGlyph")
+            size = widget.property("classicDropGlyphSize")
+            if isinstance(glyph, str) and isinstance(size, int):
+                widget.setIcon(glyph_icon(glyph, size, color))
 
     def _submit(self, command: str, payload: object = None) -> None:
         if self._busy or self.worker is None:
@@ -524,7 +445,7 @@ class MainWindow(QMainWindow):
 
     def _retranslate_ui(self) -> None:
         self.setWindowTitle(tr("Classic Drop"))
-        self.heading_title.setText(tr("Classic Drop"))
+        self._workspace_changed(self.pages.currentIndex())
         self.settings_button.setToolTip(tr("More"))
         self.settings_button.setAccessibleName(tr("More"))
         self.backups_action.setText(tr("Show backups and logs"))
@@ -547,6 +468,9 @@ class MainWindow(QMainWindow):
             widget.setAccessibleName(tr(label))
         self._update_device_info()
         self.library_search.setPlaceholderText(tr("Search title, artist, or album"))
+        self.library_search.setAccessibleName(tr("Search title, artist, or album"))
+        self.library_table.setAccessibleName(tr("iPod Library"))
+        self.table.setAccessibleName(tr("To Import"))
         self.list_mode_button.setText(tr("List"))
         self.album_mode_button.setText(tr("Albums"))
         library_headers = [
@@ -561,17 +485,18 @@ class MainWindow(QMainWindow):
         self.library_table.setHorizontalHeaderLabels(
             [tr(header) for header in library_headers]
         )
+        for column, action in self.library_view.column_actions.items():
+            action.setText(tr(library_headers[column]))
         self.back_button.setText(tr("Back to albums"))
         self.album_track_table.setHorizontalHeaderLabels(
             [tr(header) for header in ("Track", "Title", "Artist", "Duration")]
         )
-        self.tabs.setTabText(self.tabs.indexOf(self.library_page), tr("iPod Library"))
+        self.shell.retranslate()
         self.files_button.setText(tr("Add files"))
         self.folder_button.setText(tr("Add folder"))
         self.cover_button.setText(tr("Choose cover"))
         self.restore_button.setText(tr("Restore last import"))
         self.cancel_button.setText(tr("Cancel"))
-        self.tabs.setTabText(self.tabs.indexOf(self.import_page), tr("To Import"))
         self.table.setHorizontalHeaderLabels(
             [
                 "",
@@ -603,6 +528,14 @@ class MainWindow(QMainWindow):
         self._selection_changed()
         self.album_grid.viewport().update()
         self.status.setText(render_text(self._status_message))
+        self.queue_empty_title.setText(tr("Import queue is empty"))
+        self.queue_empty_detail.setText(
+            tr("Add files or a folder to prepare an import.")
+        )
+        self._update_library_empty_state()
+        self.shell.update_recovery(self._can_restore)
+        self.quit_action.setText(tr("Quit Classic Drop"))
+        self._library_selection_changed()
 
     def _update_album_detail(self, album: AlbumSummary) -> None:
         self.album_detail_title.setText(album.title or tr("Unknown album"))
@@ -641,6 +574,8 @@ class MainWindow(QMainWindow):
         self.import_button.setEnabled(
             active and not busy and self._selected_count() > 0
         )
+        self._open_action.setEnabled(active and not busy)
+        self.shell.update_recovery(self._can_restore)
         self.progress.setRange(0, 0 if busy else 1)
         if not busy:
             self.progress.setValue(0)
@@ -691,12 +626,11 @@ class MainWindow(QMainWindow):
                         Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
                     )
                 item.setToolTip(entry.detail if col == 7 else text)
-                if col == 7:
-                    item.setForeground(
-                        QColor("#ac4a32" if entry.status == "error" else "#59776e")
-                    )
                 self.table.setItem(row, col, item)
         self.table.blockSignals(False)
+        self.queue_stack.setCurrentWidget(
+            self.table if entries else self.queue_empty_page
+        )
         if entries:
             self.table.selectRow(0)
         else:
@@ -721,6 +655,9 @@ class MainWindow(QMainWindow):
             self._open_album_summary = None
         self._library_device_id = device_id
         self._library_tracks = tracks
+        self.library_table.blockSignals(True)
+        sorting = self.library_table.isSortingEnabled()
+        self.library_table.setSortingEnabled(False)
         self.library_table.setRowCount(len(tracks))
         for row, track in enumerate(tracks):
             seconds = max(0, track.length_ms // 1000)
@@ -734,9 +671,19 @@ class MainWindow(QMainWindow):
                 f"{seconds // 60}:{seconds % 60:02d}",
             )
             for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
+                item = LibraryCell(value)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setData(Qt.ItemDataRole.UserRole, track)
+                numeric = {
+                    4: track.metadata.disc_number or 0,
+                    5: track.track_number or 0,
+                    6: seconds,
+                }
+                if column in numeric:
+                    item.setData(Qt.ItemDataRole.UserRole + 1, numeric[column])
                 self.library_table.setItem(row, column, item)
+        self.library_table.setSortingEnabled(sorting)
+        self.library_table.blockSignals(False)
         self.library_count.setText(song_count(len(tracks)))
         if library_changed:
             self._albums = group_albums(tracks)
@@ -747,10 +694,57 @@ class MainWindow(QMainWindow):
         album_mode = mode == "album"
         self.list_mode_button.setChecked(not album_mode)
         self.album_mode_button.setChecked(album_mode)
-        self.library_stack.setCurrentIndex(1 if album_mode else 0)
+        self._restore_library_page(album_mode)
         self.album_detail_stack.setCurrentWidget(self.album_grid)
         self._open_album_summary = None
         self._filter_library(self.library_search.text())
+
+    def _update_library_empty_state(self) -> None:
+        if not self._library_tracks:
+            if self._active is None:
+                title = "No iPod connected"
+                detail = "Connect an iPod Classic to view its Library."
+            else:
+                title = "No music on this iPod"
+                detail = "The selected iPod Library contains no tracks."
+        elif self.library_search.text().strip():
+            album_mode = self.album_mode_button.isChecked()
+            if (
+                album_mode
+                and self.library_stack.currentWidget() is self.library_album_page
+                and self.album_detail_stack.currentWidget() is self.album_detail_page
+            ):
+                return
+            visible = (
+                any(
+                    not self.album_grid.item(row).isHidden()
+                    for row in range(self.album_grid.count())
+                )
+                if album_mode
+                else any(
+                    not self.library_table.isRowHidden(row)
+                    for row in range(self.library_table.rowCount())
+                )
+            )
+            if not visible:
+                title = "No matching music"
+                detail = "Try another title, artist, or album."
+            else:
+                self._restore_library_page(album_mode)
+                return
+        else:
+            if self.library_stack.currentWidget() is self.library_empty_page:
+                self._restore_library_page(self.album_mode_button.isChecked())
+            return
+
+        self.library_empty_title.setText(tr(title))
+        self.library_empty_detail.setText(tr(detail))
+        self.library_stack.setCurrentWidget(self.library_empty_page)
+
+    def _restore_library_page(self, album_mode: bool) -> None:
+        self.library_stack.setCurrentWidget(
+            self.library_album_page if album_mode else self.library_list_page
+        )
 
     def _update_album_grid(self) -> None:
         self.album_grid.clear()
@@ -770,9 +764,7 @@ class MainWindow(QMainWindow):
         self._update_album_detail(album)
         pixmap = self._album_artwork.get(album.artwork_id)
         if pixmap is None:
-            self.album_detail_cover.setPixmap(
-                glyph_icon("album", 120, QColor("#899497")).pixmap(QSize(120, 120))
-            )
+            self.album_detail_cover.setPixmap(self._album_placeholder())
             self._request_artwork(album.artwork_id)
         else:
             self.album_detail_cover.setPixmap(
@@ -794,6 +786,12 @@ class MainWindow(QMainWindow):
             for column, value in enumerate(values):
                 self.album_track_table.setItem(row, column, QTableWidgetItem(value))
         self.album_detail_stack.setCurrentWidget(self.album_detail_page)
+        self._library_selection_changed()
+
+    def _album_placeholder(self) -> QPixmap:
+        return glyph_icon(
+            "album", 120, self.palette().color(QPalette.ColorRole.PlaceholderText)
+        ).pixmap(QSize(120, 120))
 
     def _request_artwork(self, artwork_id: int) -> None:
         if (
@@ -817,6 +815,8 @@ class MainWindow(QMainWindow):
         ).copy()
         pixmap = QPixmap.fromImage(image)
         self._album_artwork[artwork.artwork_id] = pixmap
+        if artwork.artwork_id == self._inspector_artwork_id:
+            self._update_library_inspector_cover()
         for row in range(self.album_grid.count()):
             item = self.album_grid.item(row)
             album = item.data(ALBUM_ROLE)
@@ -842,7 +842,10 @@ class MainWindow(QMainWindow):
 
     def _filter_library(self, text: str) -> None:
         query = text.casefold().strip()
-        for row, track in enumerate(self._library_tracks):
+        for row in range(self.library_table.rowCount()):
+            track = self.library_view.track_at(row)
+            if track is None:
+                continue
             haystack = "\n".join(
                 (track.title, track.artist, track.album, track.album_artist)
             ).casefold()
@@ -861,6 +864,8 @@ class MainWindow(QMainWindow):
                 )
             ).casefold()
             self.album_grid.item(row).setHidden(bool(query and query not in haystack))
+        self._update_library_empty_state()
+        self._library_selection_changed()
 
     def edited_entries(self) -> tuple[PreviewEntry, ...]:
         return tuple(
@@ -894,7 +899,11 @@ class MainWindow(QMainWindow):
     def _show_cover(self, artwork: ArtworkPixels | None) -> None:
         if artwork is None:
             self.cover.setPixmap(
-                glyph_icon("album", 64, QColor("#9aa7ad")).pixmap(QSize(64, 64))
+                glyph_icon(
+                    "album",
+                    64,
+                    self.palette().color(QPalette.ColorRole.PlaceholderText),
+                ).pixmap(QSize(64, 64))
             )
         else:
             image = QImage(
@@ -1064,7 +1073,7 @@ class MainWindow(QMainWindow):
                 self._paths = ()
                 self.show_entries(())
             self._update_library_table()
-            self.tabs.setCurrentWidget(self.library_page)
+            self.pages.setCurrentWidget(self.library_page)
             self._set_status("Library loaded")
         elif command == "preview":
             old = {entry.path: entry for entry in self.edited_entries()}
@@ -1086,7 +1095,7 @@ class MainWindow(QMainWindow):
                 for entry in incoming
             )
             self.show_entries(merged)
-            self.tabs.setCurrentWidget(self.import_page)
+            self.pages.setCurrentWidget(self.import_page)
             self._set_status(
                 "Preview ready"
                 if self._entries
@@ -1144,9 +1153,10 @@ class MainWindow(QMainWindow):
         self._update_library_table()
         self.set_busy(False)
         canceled = (
-            isinstance(message, SourceText)
-            and message.source == "Operation canceled"
-        ) or "cancel" in display_message.casefold() or "取消" in display_message
+            (isinstance(message, SourceText) and message.source == "Operation canceled")
+            or "cancel" in display_message.casefold()
+            or "取消" in display_message
+        )
         self._set_status("Operation canceled" if canceled else "Operation incomplete")
         dialog = QMessageBox(self)
         dialog.setWindowTitle(tr("Classic Drop"))

@@ -3,6 +3,16 @@
 <TS version="2.1" language="ja_JP" sourcelanguage="en_US">
   <context>
     <name>ClassicDrop</name>
+    <message><source>Workspaces</source><translation>ワークスペース</translation></message>
+    <message><source>Current iPod</source><translation>現在の iPod</translation></message>
+    <message><source>Toggle inspector</source><translation>インスペクタを表示・非表示</translation></message>
+    <message><source>Recovery &amp; History</source><translation>復元と履歴</translation></message>
+    <message><source>Last import can be restored</source><translation>前回の読み込みを復元できます</translation></message>
+    <message><source>No recovery available</source><translation>復元できる記録がありません</translation></message>
+    <message><source>Restore the selected iPod to its state before the last import.</source><translation>選択した iPod を前回の読み込み前の状態に戻します。</translation></message>
+    <message><source>Connect an iPod with a recoverable import to restore its Library.</source><translation>復元できる読み込み記録のある iPod を接続してください。</translation></message>
+    <message><source>{count} selected</source><translation>{count}を選択中</translation></message>
+    <message><source>Quit Classic Drop</source><translation>Classic Drop を終了</translation></message>
     <message><source>More</source><translation>その他</translation></message>
     <message><source>Settings</source><translation>設定</translation></message>
     <message><source>General</source><translation>一般</translation></message>
@@ -15,6 +25,12 @@
     <message><source>Refresh devices</source><translation>デバイスを更新</translation></message>
     <message><source>Safely eject</source><translation>安全に取り出す</translation></message>
     <message><source>No device connected</source><translation>デバイスが接続されていません</translation></message>
+    <message><source>No iPod connected</source><translation>iPod が接続されていません</translation></message>
+    <message><source>Connect an iPod Classic to view its Library.</source><translation>iPod Classic を接続するとライブラリが表示されます。</translation></message>
+    <message><source>No music on this iPod</source><translation>この iPod に音楽がありません</translation></message>
+    <message><source>The selected iPod Library contains no tracks.</source><translation>選択した iPod のライブラリに曲がありません。</translation></message>
+    <message><source>No matching music</source><translation>一致する音楽がありません</translation></message>
+    <message><source>Try another title, artist, or album.</source><translation>別のタイトル、アーティスト、アルバムを検索してください。</translation></message>
     <message><source>Search title, artist, or album</source><translation>タイトル、アーティスト、アルバムを検索</translation></message>
     <message><source>List</source><translation>リスト</translation></message>
     <message><source>Albums</source><translation>アルバム</translation></message>
@@ -30,6 +46,8 @@
     <message><source>Unknown artist</source><translation>不明なアーティスト</translation></message>
     <message><source>iPod Library</source><translation>iPod ライブラリ</translation></message>
     <message><source>To Import</source><translation>読み込み待ち</translation></message>
+    <message><source>Import queue is empty</source><translation>読み込みキューは空です</translation></message>
+    <message><source>Add files or a folder to prepare an import.</source><translation>読み込むファイルまたはフォルダを追加してください。</translation></message>
     <message><source>Add files</source><translation>ファイルを追加</translation></message>
     <message><source>Add folder</source><translation>フォルダを追加</translation></message>
     <message><source>Remove from queue</source><translation>キューから削除</translation></message>

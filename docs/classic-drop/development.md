@@ -14,6 +14,16 @@ Status: active-handoff
 
 **Spec:** [路线图](roadmap.md) 与 [UI 设计](ui-design.md)（尤其多语言章节）。
 
+## 2026-10-29 进度更新
+
+多语言基础已随 `96e9b13` 合入。当前工作区已实现第二阶段 macOS UI 的基础外壳：来源列表侧栏、原生 `QToolBar`、可折叠检查器及独立恢复入口；窗口构建已拆为 `shell.py`、`library_view.py`、`import_view.py` 与 `presentation.py`。保留现有引擎和 worker 的设备权限、追加导入与恢复契约；本轮实现尚未提交。
+
+当前外壳采用 Qt 原生平台样式和系统语义调色板，启动不再强制 Fusion；不透明内容表面是这一增量的明确实现范围，不宣称实现 Liquid Glass 或 AppKit 材料一致性。940×580 时默认折叠检查器，用户可重新打开，提交与取消仍在独立底栏。曲库默认四列，表头菜单可展开其他列；排序保持 Track、筛选与检查器关联。批量删除、增强查重和发布流程仍未实现。
+
+本机定向回归 80 项通过，包含侧栏切换保留编辑、英中日重译、空状态、调色板图标、最小窗口、曲库排序及检查器、恢复可用性、快捷键可用性与取消关闭。Ruff 格式/lint、Classic Drop 源码及新增测试的定向 Mypy 和锁文件检查通过。36 张实际 Qt 控件渲染覆盖三语、浅深色、两种窗口尺寸和三个工作区，使用明确标记的合成曲目，未连接真实 iPod。
+
+上述图片由 offscreen 后端的 Fusion 回退样式生成，证明布局和状态，不证明原生 macOS 材料。原生 macOS 样式不适用于 offscreen 后端；原生窗口、Retina、VoiceOver、系统辅助功能、macOS 12.3 与实机 iPod 仍需分别验收。独立代码审查及修复已完成，最终打包与检查限制见末尾执行记录。
+
 ## 全局约束
 
 - 保持 macOS 12.3 最低系统声明；最新系统真实材料和硬件兼容需 Mac 实机验证，Windows 测试不替代实机验收。
@@ -27,8 +37,8 @@ Status: active-handoff
 
 | 顺序 | 工作项 | 具体交付 | 当前状态 |
 | --- | --- | --- | --- |
-| 1 | 中日英多语言 | 独立翻译目录、系统默认/手动选择、运行时重译、状态保留、离线打包 | 本机已实现；待独立审查、提交和 macOS 验证 |
-| 2 | macOS UI 与窗口职责拆分 | 侧栏/统一工具栏/检查器、语义配色、原生平台样式、浅深色/辅助功能、旧系统回退 | 待开发 |
+| 1 | 中日英多语言 | 独立翻译目录、系统默认/手动选择、运行时重译、状态保留、离线打包 | 已合入 `96e9b13`；原生平台验收仍需补齐 |
+| 2 | macOS UI 与窗口职责拆分 | 侧栏/统一工具栏/检查器、语义配色、原生平台样式、浅深色/辅助功能、旧系统回退 | 当前工作区已实现不透明 Qt 外壳；平台和辅助功能验收待完成 |
 | 3 | 导入查重增强 | 队列内/曲库匹配、精确/历史/疑似分层、匹配依据、人工覆盖、复核及选择保留 | 待开发 |
 | 4 | 六维筛选和删除包 | AND/OR 条件、多选/全匹配加入、去重、移出/清空、设备/快照绑定、最终复核 | 待开发 |
 | 5 | 可恢复删除与恢复入口 | 新 ADR、设备端保留、事务验证、中断/重连、共享媒体、末次写入顺序 | 待开发；先验证恢复策略 |
@@ -40,12 +50,22 @@ Status: active-handoff
 ## 首阶段任务清单
 
 - [x] 阅读当前规格、启动入口、窗口、上游翻译维护规范和测试；确认工作区基线与分支。
-- [ ] 准备锁定环境，运行现有 Classic Drop 定向基线。
-- [ ] 先增加语言选择、catalog、占位符和热切换保留队列的失败测试。
-- [ ] 实现独立语言管理、两份翻译源/编译目录，接入菜单选择与窗口重译。
-- [ ] 迁移可见静态/动态提示与应用错误模板，保留诊断参数原文；打包目录资源。
-- [ ] 完成定向测试、静态检查、独立代码审查与必要修复，并记录证据。
-- [ ] 汇报首阶段结果及仍待开发项，不把多语言交付等同于整条路线完成。
+- [x] 准备锁定环境，运行现有 Classic Drop 定向基线。
+- [x] 先增加语言选择、catalog、占位符和热切换保留队列的失败测试。
+- [x] 实现独立语言管理、两份翻译源/编译目录，接入菜单选择与窗口重译。
+- [x] 迁移可见静态/动态提示与应用错误模板，保留诊断参数原文；打包目录资源。
+- [x] 完成定向测试、静态检查、独立代码审查与必要修复，并记录证据；全仓检查未通过项见执行记录。
+- [x] 汇报首阶段结果及仍待开发项，不把多语言交付等同于整条路线完成。
+
+## 第二阶段任务清单：macOS UI 基础外壳
+
+- [x] 采用系统平台样式和语义调色板，移除启动时强制 Fusion，补齐可翻译空状态。
+- [x] 实现来源列表侧栏、统一工具栏、三个现有能力工作区和可折叠检查器，保留底栏进度与取消。
+- [x] 拆分窗口构建模块，保持引擎与 worker 契约；曲库排序、筛选与检查器关联同一 Track。
+- [x] 覆盖切换工作区/语言后的状态保留、最小窗口、快捷键和取消安全关闭；更新三语 catalogs。
+- [x] 完成 36 张 Qt 控件布局渲染、定向回归、静态检查、独立审查和 Apple Silicon 本地打包。
+- [ ] 验收原生 macOS 窗口、Retina、VoiceOver、系统辅助功能及 macOS 12.3；确认目标材料表现。
+- [ ] 完成真实 iPod 回归与正式签名/公证；这些不属于本轮基础外壳交付。
 
 ## Task 1：语言管理与 catalog
 
@@ -84,3 +104,13 @@ Status: active-handoff
 - uv lock --check、全仓 Ruff、相关文件 Mypy、修改文档 Rumdl 均通过。全仓 Rumdl 因已有 podcast 文档链接到缺失的 .scratch 文件失败；全仓 Mypy 仍有既有 Classic Drop 测试类型错误。
 - 全仓 pytest 曾运行至 7063 passed、34 failed、3 errors、121 skipped；未达到全量通过。上游德语/西语 catalog 测试单独复现 pyside6-lupdate 进程异常退出；其余失败未逐项定位。Windows 符号链接权限失败在本轮开发前的基线中已存在。
 - 已自行检查代码与打包资源；独立 review 尚未执行。Task 2 原计划中的 `__main__.py` / `window_text.py` 文件名是规划示例，实际实现以当前代码结构和后续提交为准。
+
+### 2026-10-29 macOS UI 验证记录
+
+- 本节更新上述历史记录：多语言已合入 `96e9b13`；UI 实现在当前 `classic-drop` 分支工作区，未提交或推送。
+- `uv run pytest -q tests/classic_drop tests/iOpenPod/GUI/presentation/test_icons.py`：80 passed。另以不同文件顺序运行窗口、语言和调色板回归：58 passed，验证设置隔离。
+- `uv lock --check`、`uv run ruff format --check .`（1091 files）、`uv run ruff check .` 通过；`uv run mypy src/classic_drop tests/classic_drop/test_shell.py tests/classic_drop/test_palette.py tests/classic_drop/conftest.py` 检查 16 个源文件通过。
+- 修改文档的定向 Rumdl 与 `git diff --check` 通过。全仓 Mypy 仍报五个原有测试文件中的 98 个类型错误；全仓 Rumdl 仍因 `docs/research/podcast-authoring-comparison-notes.md` 的两条缺失私有文件链接失败。本轮未运行全仓 Pytest，不声明全仓通过。
+- 独立审查后修复两处调色板问题：专辑选中态元数据使用 HighlightedText，已打开的专辑占位封面随调色板刷新而不重置状态。审查范围内无未解决的产品问题。
+- `uv run pyinstaller --clean --noconfirm packaging/classic-drop.spec` 退出码 0，生成 `dist/Classic Drop.app`（arm64）。`codesign --verify --deep --strict --verbose=2` 通过；这是本地 ad-hoc 签名，未进行 Developer ID 签名或公证。
+- 三语 × 浅深色 × 两种尺寸 × 三个工作区的 36 张布局渲染保存在忽略目录 `.scratch/classic-drop-ui-verification/`。原生 GUI 检查工具因本机运行时配置错误不可用；不以 offscreen 图片替代原生窗口、辅助功能或硬件验收。
