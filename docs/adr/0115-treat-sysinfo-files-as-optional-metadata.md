@@ -28,7 +28,10 @@ or removed command input invalidates its reviewed output.
 
 Signing uses the current Connection Generation's hardware Device Evidence directly,
 with SysInfo and SysInfoExtended as alternate metadata sources when hardware lacks
-a transport identifier. Equally authoritative conflicting GUIDs are not guessed.
+a usable eight-byte FireWire GUID. Generic USB serials that are not complete
+16-digit hexadecimal GUIDs do not participate in signing-identity conflict checks.
+Equally authoritative conflicting valid GUIDs are not guessed, and do not permit
+fallback to metadata.
 The same identity is checked again before publication. An actual signing identity
 and valid device-bound HashInfo material remain required where the checksum needs
 them; optional metadata does not authorize invented identity or unsigned output.
