@@ -74,7 +74,10 @@ STATUS = {
     "new": "Queued",
     "imported": "Already imported",
     "duplicate": "Duplicate in batch",
+    "confirmed_duplicate": "Confirmed duplicate",
+    "history_match": "History match",
     "possible_duplicate": "Possible duplicate",
+    "check_incomplete": "Check incomplete",
     "error": "Cannot import",
 }
 
@@ -175,6 +178,7 @@ class MainWindow(QMainWindow):
         self.track_title = self.import_view.track_title
         self.track_details = self.import_view.track_details
         self.source_label = self.import_view.source_label
+        self.status_filter = self.import_view.status_filter
         self.library_empty_page = self.library_view.library_empty_page
         self.library_empty_title = self.library_view.library_empty_title
         self.library_empty_detail = self.library_view.library_empty_detail
@@ -494,6 +498,13 @@ class MainWindow(QMainWindow):
         self.shell.retranslate()
         self.files_button.setText(tr("Add files"))
         self.folder_button.setText(tr("Add folder"))
+        self.status_filter.setItemText(0, tr("All statuses"))
+        self.status_filter.setItemText(1, tr("New"))
+        self.status_filter.setItemText(2, tr("Confirmed duplicate"))
+        self.status_filter.setItemText(3, tr("History match"))
+        self.status_filter.setItemText(4, tr("Possible duplicate"))
+        self.status_filter.setItemText(5, tr("Check incomplete"))
+        self.status_filter.setItemText(6, tr("Cannot import"))
         self.cover_button.setText(tr("Choose cover"))
         self.restore_button.setText(tr("Restore last import"))
         self.cancel_button.setText(tr("Cancel"))
@@ -599,7 +610,7 @@ class MainWindow(QMainWindow):
         for row, entry in enumerate(entries):
             checked = QTableWidgetItem()
             flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-            if entry.status not in ("error", "duplicate"):
+            if entry.status != "error":
                 flags |= Qt.ItemFlag.ItemIsUserCheckable
             checked.setFlags(flags)
             checked.setCheckState(
@@ -636,6 +647,14 @@ class MainWindow(QMainWindow):
         else:
             self._selection_changed()
         self._queue_changed()
+        self._filter_import_status()
+
+    def _filter_import_status(self, _index: int = -1) -> None:
+        status = self.status_filter.currentData()
+        for row, entry in enumerate(self._entries):
+            self.table.setRowHidden(
+                row, status not in (None, "all") and entry.status != status
+            )
 
     def _update_library_table(self) -> None:
         tracks = tuple(getattr(getattr(self._active, "library", None), "tracks", ()))
@@ -1006,7 +1025,34 @@ class MainWindow(QMainWindow):
 
     def _commit(self) -> None:
         try:
-            self._submit("commit", self.edited_entries())
+            entries = self.edited_entries()
+            selected = tuple(entry for entry in entries if entry.selected)
+            risky = sum(
+                entry.status
+                in (
+                    "confirmed_duplicate",
+                    "history_match",
+                    "possible_duplicate",
+                    "check_incomplete",
+                )
+                for entry in selected
+            )
+            if (
+                risky
+                and QMessageBox.question(
+                    self,
+                    tr("Review duplicate matches"),
+                    tr(
+                        "{selected} songs selected; {matches} have duplicate matches or incomplete checks. Continue importing the selected songs?"
+                    ).format(
+                        selected=song_count(len(selected)),
+                        matches=song_count(risky),
+                    ),
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                return
+            self._submit("commit", entries)
         except ValueError as error:
             QMessageBox.warning(self, tr("Invalid track number"), str(error))
 

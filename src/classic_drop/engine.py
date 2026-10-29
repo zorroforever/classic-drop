@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
+from classic_drop.duplicate import MetadataCandidateIndex
 from classic_drop.history import ImportHistory
 from classic_drop.media import PreparedSong, collect_audio, prepare_song
 from iOpenPod.app.display_text import exception_text, source_text
@@ -28,7 +29,7 @@ from iOpenPod.app.services.device_coordinator import (
     SyncRecoveryRequiredError,
 )
 from iPodDB.library import ArtworkPixels
-from storage import HostPath, Storage, capture_host_file
+from storage import DevicePath, HostPath, Storage, capture_host_file
 
 
 class OperationCancelledError(Exception):
@@ -168,9 +169,13 @@ class ClassicDropEngine:
             self._checkpoint(cancelled)
 
         receipts = self.history.receipts(self._identity())
-        retained = {(t.metadata.location, t.size_bytes) for t in active.library.tracks}
-        seen: set[str] = set()
+        seen: dict[str, PreviewEntry] = {}
+        for old_entry in self._entries.values():
+            old_song = self._songs.get(old_entry.token)
+            if old_song is not None:
+                seen.setdefault(old_song.original.sha256, old_entry)
         entries: list[PreviewEntry] = []
+        candidate_index = MetadataCandidateIndex(active.library.tracks)
         with self.coordinator.sync_session(active) as session:
             device_root = session.mounted_volume.mount_point.path.resolve()
         sources = collect_audio(paths)
@@ -180,7 +185,7 @@ class ClassicDropEngine:
                 entry = self._entries[path]
                 entries.append(entry)
                 if entry.token in self._songs:
-                    seen.add(self._songs[entry.token].original.sha256)
+                    seen.setdefault(self._songs[entry.token].original.sha256, entry)
                 continue
             self.progress(
                 WriteProgress(
@@ -200,20 +205,9 @@ class ClassicDropEngine:
                 )
                 song = prepared.song
                 sha = prepared.original.sha256
-                status = "new"
-                if sha in seen:
-                    status = "duplicate"
-                elif receipts.get(sha) in retained:
-                    status = "imported"
-                elif any(
-                    t.title.casefold() == song.track.title.casefold()
-                    and t.artist.casefold() == song.track.artist.casefold()
-                    and t.album.casefold() == song.track.album.casefold()
-                    and abs(t.length_ms - song.track.length_ms) < 1500
-                    for t in active.library.tracks
-                ):
-                    status = "possible_duplicate"
-                seen.add(sha)
+                status, detail = self._duplicate_status(
+                    sha, prepared, seen, receipts, active, candidate_index
+                )
                 self._songs[token] = prepared
                 entries.append(
                     PreviewEntry(
@@ -231,9 +225,10 @@ class ClassicDropEngine:
                         song.track.length_ms,
                         song.track.size_bytes,
                         song.artwork,
-                        "\n".join(prepared.warnings),
+                        "\n".join(filter(None, (detail, *prepared.warnings))),
                     )
                 )
+                seen.setdefault(sha, entries[-1])
             except OperationCancelledError:
                 raise
             except Exception as error:
@@ -249,6 +244,94 @@ class ClassicDropEngine:
         checkpoint()
         self._entries = {entry.path: entry for entry in entries}
         return tuple(entries)
+
+    def _duplicate_status(
+        self,
+        sha: str,
+        prepared: PreparedSong,
+        seen: dict[str, PreviewEntry],
+        receipts: dict[str, tuple[str, int]],
+        active: ActiveIPod,
+        candidates_index: MetadataCandidateIndex,
+    ) -> tuple[str, str]:
+        queued = seen.get(sha)
+        if queued is not None:
+            return (
+                "confirmed_duplicate",
+                source_text(
+                    "SHA-256 matches queued file: {name}", name=queued.path.name
+                ),
+            )
+
+        recorded = receipts.get(sha)
+        receipt_track = next(
+            (
+                track
+                for track in active.library.tracks
+                if recorded == (track.metadata.location, track.size_bytes)
+            ),
+            None,
+        )
+        candidates = candidates_index.find(prepared.song.track)
+        if receipt_track is not None and receipt_track not in candidates:
+            candidates = (*candidates, receipt_track)
+
+        if candidates:
+            failures: list[str] = []
+            try:
+                with self.coordinator.sync_session(active) as session:
+                    for candidate in candidates:
+                        if candidate.size_bytes != prepared.original.size:
+                            continue
+                        try:
+                            observed = session.fingerprint(
+                                DevicePath(candidate.metadata.location)
+                            )
+                        except Exception as error:
+                            failures.append(f"{candidate.metadata.location}: {error}")
+                            continue
+                        if observed.sha256 == sha:
+                            return (
+                                "confirmed_duplicate",
+                                source_text(
+                                    "SHA-256 matches iPod track: {title}",
+                                    title=candidate.title,
+                                ),
+                            )
+            except Exception as error:
+                failures.append(f"iPod candidate session: {error}")
+            if failures:
+                return (
+                    "check_incomplete",
+                    source_text(
+                        "Could not verify matching iPod candidates: {details}",
+                        details="; ".join(failures),
+                    ),
+                )
+
+        if receipt_track is not None:
+            return (
+                "history_match",
+                source_text(
+                    "Prior import receipt matches {path}; device content differs",
+                    path=receipt_track.metadata.location,
+                ),
+            )
+        if candidates:
+            candidate = candidates[0]
+            return (
+                "possible_duplicate",
+                source_text(
+                    "Title and artist match; duration differs by {duration} ms: {title} — {artist} — {album}",
+                    duration=str(
+                        abs(candidate.length_ms - prepared.song.track.length_ms)
+                    ),
+                    title=candidate.title,
+                    artist=candidate.artist,
+                    album=candidate.album,
+                ),
+            )
+        return "new", source_text("No matching queue item or iPod track found")
 
     def commit(
         self, entries: tuple[PreviewEntry, ...], cancelled: Event

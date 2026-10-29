@@ -64,7 +64,20 @@
     <message><source>Queued</source><translation>待导入</translation></message>
     <message><source>Already imported</source><translation>已导入</translation></message>
     <message><source>Duplicate in batch</source><translation>批内重复</translation></message>
+    <message><source>Confirmed duplicate</source><translation>已确认重复</translation></message>
+    <message><source>History match</source><translation>历史记录匹配</translation></message>
     <message><source>Possible duplicate</source><translation>疑似重复</translation></message>
+    <message><source>Check incomplete</source><translation>检查未完成</translation></message>
+    <message><source>All statuses</source><translation>全部状态</translation></message>
+    <message><source>New</source><translation>新增</translation></message>
+    <message><source>Review duplicate matches</source><translation>复核重复匹配</translation></message>
+    <message><source>{selected} songs selected; {matches} have duplicate matches or incomplete checks. Continue importing the selected songs?</source><translation>已选择 {selected}；其中 {matches} 项存在重复匹配或检查未完成。仍要导入所选歌曲吗？</translation></message>
+    <message><source>SHA-256 matches queued file: {name}</source><translation>SHA-256 与队列中的文件一致：{name}</translation></message>
+    <message><source>SHA-256 matches iPod track: {title}</source><translation>SHA-256 与 iPod 曲目一致：{title}</translation></message>
+    <message><source>Could not verify matching iPod candidates: {details}</source><translation>无法验证匹配的 iPod 候选项：{details}</translation></message>
+    <message><source>Prior import receipt matches {path}; device content differs</source><translation>历史导入记录对应 {path}，但设备文件内容已变化</translation></message>
+    <message><source>Title and artist match; duration differs by {duration} ms: {title} — {artist} — {album}</source><translation>标题和艺人一致，时长相差 {duration} 毫秒：{title} — {artist} — {album}</translation></message>
+    <message><source>No matching queue item or iPod track found</source><translation>队列和 iPod 曲库中均未发现匹配项</translation></message>
     <message><source>Cannot import</source><translation>无法导入</translation></message>
     <message><source>Import after conversion</source><translation>转换后导入</translation></message>
     <message numerus="yes"><source>%n song(s)</source><translation><numerusform>%Ln 首</numerusform></translation></message>

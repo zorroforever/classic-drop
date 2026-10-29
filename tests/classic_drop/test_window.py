@@ -44,6 +44,35 @@ def test_preview_keeps_duplicates_unchecked_and_tracks_edits(app):
     window.close()
 
 
+def test_duplicate_can_be_explicitly_selected_and_filtered(app):
+    window = MainWindow(start_worker=False)
+    window.show_entries(
+        (
+            PreviewEntry(
+                "duplicate",
+                Path("/tmp/copy.m4a"),
+                title="Copy",
+                status="confirmed_duplicate",
+                selected=False,
+                detail="SHA-256 matches queued file: original.m4a",
+            ),
+            PreviewEntry("new", Path("/tmp/new.m4a"), title="New"),
+        )
+    )
+
+    duplicate_check = window.table.item(0, 0)
+    duplicate_check.setCheckState(Qt.CheckState.Checked)
+    window.import_view.status_filter.setCurrentIndex(
+        window.import_view.status_filter.findData("confirmed_duplicate")
+    )
+
+    assert window.edited_entries()[0].selected
+    assert not window.table.isRowHidden(0)
+    assert window.table.isRowHidden(1)
+    assert "SHA-256" in window.table.item(0, 7).toolTip()
+    window.close()
+
+
 def test_library_view_lists_existing_tracks_and_filters_without_editing(app):
     window = MainWindow(start_worker=False)
     tracks = (

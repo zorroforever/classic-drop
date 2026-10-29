@@ -64,7 +64,20 @@
     <message><source>Queued</source><translation>読み込み待ち</translation></message>
     <message><source>Already imported</source><translation>読み込み済み</translation></message>
     <message><source>Duplicate in batch</source><translation>選択内の重複</translation></message>
+    <message><source>Confirmed duplicate</source><translation>重複を確認済み</translation></message>
+    <message><source>History match</source><translation>履歴の一致</translation></message>
     <message><source>Possible duplicate</source><translation>重複の可能性</translation></message>
+    <message><source>Check incomplete</source><translation>確認未完了</translation></message>
+    <message><source>All statuses</source><translation>すべての状態</translation></message>
+    <message><source>New</source><translation>新規</translation></message>
+    <message><source>Review duplicate matches</source><translation>重複候補を確認</translation></message>
+    <message><source>{selected} songs selected; {matches} have duplicate matches or incomplete checks. Continue importing the selected songs?</source><translation>{selected} 曲を選択中です。そのうち {matches} 件に重複候補または未完了の確認があります。選択した曲を読み込みますか？</translation></message>
+    <message><source>SHA-256 matches queued file: {name}</source><translation>SHA-256 がキュー内のファイルと一致: {name}</translation></message>
+    <message><source>SHA-256 matches iPod track: {title}</source><translation>SHA-256 が iPod の曲と一致: {title}</translation></message>
+    <message><source>Could not verify matching iPod candidates: {details}</source><translation>一致候補の iPod ファイルを検証できませんでした: {details}</translation></message>
+    <message><source>Prior import receipt matches {path}; device content differs</source><translation>以前の読み込み記録は {path} と一致しますが、デバイス上の内容は異なります</translation></message>
+    <message><source>Title and artist match; duration differs by {duration} ms: {title} — {artist} — {album}</source><translation>タイトルとアーティストが一致し、長さは {duration} ミリ秒異なります: {title} — {artist} — {album}</translation></message>
+    <message><source>No matching queue item or iPod track found</source><translation>キューと iPod ライブラリに一致する項目はありません</translation></message>
     <message><source>Cannot import</source><translation>読み込めません</translation></message>
     <message><source>Import after conversion</source><translation>変換後に読み込む</translation></message>
     <message numerus="yes"><source>%n song(s)</source><translation><numerusform>%Ln 曲</numerusform></translation></message>

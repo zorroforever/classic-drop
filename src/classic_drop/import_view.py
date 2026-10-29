@@ -8,6 +8,7 @@ from PySide6.QtCore import QModelIndex, QPersistentModelIndex, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -58,6 +59,19 @@ class ImportView(QWidget):
         self.count_label = QLabel("0 songs")
         self.count_label.setObjectName("muted")
         toolbar.addWidget(self.count_label)
+        self.status_filter = QComboBox()
+        for label, status in (
+            ("All statuses", "all"),
+            ("New", "new"),
+            ("Confirmed duplicate", "confirmed_duplicate"),
+            ("History match", "history_match"),
+            ("Possible duplicate", "possible_duplicate"),
+            ("Check incomplete", "check_incomplete"),
+            ("Cannot import", "error"),
+        ):
+            self.status_filter.addItem(label, status)
+        self.status_filter.currentIndexChanged.connect(controller._filter_import_status)
+        toolbar.addWidget(self.status_filter)
         import_layout.addLayout(toolbar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
