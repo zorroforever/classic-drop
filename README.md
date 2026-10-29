@@ -1,5 +1,7 @@
 # Classic Drop
 
+English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white)](#requirements)
 [![Python: 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](#development)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
@@ -20,6 +22,7 @@ It is designed for people who want to keep the music already on an iPod, add a f
 - **Existing-library browser:** inspect the current iPod library without editing it; search by track, artist, or album.
 - **Album view:** switch between a track list and an artwork grid, then double-click an album to inspect its tracks, year, duration, and cover.
 - **Duplicate-aware queue:** likely duplicates are unchecked by default and can be reviewed before import.
+- **Recoverable removal:** review and explicitly remove selected music tracks in a separate workspace, with device-side recovery data retained for restoration.
 - **Recovery:** interrupted writes keep a recovery record and expose a restore action in the app.
 - **macOS workspaces:** sidebar navigation, a native toolbar, a collapsible artwork inspector, and system palette support in English, Simplified Chinese, and Japanese.
 - **Read-only device discovery:** connecting, discovering, and browsing do not modify the iPod.
@@ -31,17 +34,18 @@ Classic Drop currently targets:
 - macOS hosts;
 - Apple-stock-firmware iPod Classic devices;
 - filesystem-accessible devices with a readable iTunes database;
-- music import and artwork/metadata handling.
+- music import, artwork/metadata handling, and explicit recoverable music-track removal.
 
 The following are intentionally out of scope:
 
 - Rockbox-managed devices;
 - iPod touch, iPhone, or iPod shuffle;
-- deleting an arbitrary existing song or album from the stock library;
+- permanent deletion or automatic mirror-based deletion;
+- removing podcasts, audiobooks, videos, or other non-music media;
 - replacing Finder/iTunes device management;
 - cloud music services or online metadata lookup.
 
-An import is append-only. Removing one existing track or album is not implemented as an independent operation; use a full library-management tool for that workflow. The **Restore last import** action is limited to the most recent Classic Drop import and is not a general deletion feature.
+An import is append-only. Removing existing music is a separate, explicit workflow in **To Remove**: review the selected tracks and affected playlists before confirming. Removal also removes those tracks from playlists, while retaining original database and media files on the iPod for recovery. Recovery data continues to occupy device capacity, so removal does not immediately free that space. A removal must be restored before another import or removal; consecutive imports remain allowed and individually recoverable. Restoration requires the original iPod and the local operation history. See [ADR-0177](docs/adr/0177-classic-drop-recoverable-track-removal.md).
 
 ## Requirements
 
@@ -102,6 +106,7 @@ The Classic Drop implementation is split into:
 - `src/classic_drop/worker.py` - serialized device/media operations;
 - `src/classic_drop/window.py` - Qt application window and import/library workflows;
 - `src/classic_drop/albums.py` - album grouping, artwork cards, and album presentation;
+- `src/classic_drop/removal.py`, `removal_view.py`, and `removal_review.py` - music filters, removal selection, and confirmation;
 - `src/classic_drop/shell.py`, `library_view.py`, `import_view.py`, and `presentation.py` - workspace shell, focused view widgets, and shared native-palette presentation;
 - `tests/classic_drop/` - engine, media, worker, and UI regression tests.
 
@@ -143,5 +148,4 @@ Classic Drop is licensed under the [GNU General Public License v3.0 or later](LI
 - signed and notarized macOS release artifacts;
 - wider A1238 and iPod Classic fixture coverage;
 - safer import preview for low-space devices;
-- explicit per-track/per-album removal with a separate, opt-in workflow;
 - richer release metadata and optional online artwork lookup.
