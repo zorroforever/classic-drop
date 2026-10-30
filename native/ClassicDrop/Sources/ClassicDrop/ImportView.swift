@@ -11,6 +11,14 @@ struct ImportView: View {
         model.queue.filter { (status == "all" || $0.status == status) && (search.isEmpty || "\($0.title) \($0.artist) \($0.album)".localizedCaseInsensitiveContains(search)) }
     }
     var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(t("alac.original"), isOn: Binding(get: { model.alacOriginalImport }, set: { model.setAlacOriginalImport($0) }))
+                    .toggleStyle(.switch).disabled(!model.canChangeAlacOriginalImport)
+                Text(t(model.queue.isEmpty ? (model.alacOriginalImport ? "alac.original.on" : "alac.original.off") : "alac.original.locked"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
         if model.queue.isEmpty {
             EmptyWorkspace(symbol: "music.note.list", title: t("queue.empty"), detail: t("queue.hint")) {
                 HStack {
@@ -59,6 +67,7 @@ struct ImportView: View {
                 }.font(.caption).padding(14)
             }
         }
+        }
     }
 }
 
@@ -80,6 +89,9 @@ struct InspectorView: View {
                     Divider()
                     info("album", track.album); info("year", track.year > 0 ? "\(track.year)" : "—")
                     info("duration", track.duration); info("genre", track.genre)
+                    HStack { Text(t("audio.codec")).foregroundStyle(.secondary); Spacer(); TrackCodecCell(trackID: track.id, model: model, strings: strings) }.font(.callout)
+                    info("audio.bit_depth", model.audioFormats[track.id]?.bitDepthText ?? "…")
+                    info("audio.sample_rate", model.audioFormats[track.id]?.sampleRateText ?? "…")
                 } else if let album = model.selectedAlbum {
                     CoverView(id: album.artworkId)
                     Text(album.title.isEmpty ? t("album.unknown") : album.title).font(.title2.bold())
@@ -87,6 +99,7 @@ struct InspectorView: View {
                     Divider()
                     info("year", album.year > 0 ? "\(album.year)" : "—")
                     info("songs", "\(album.trackCount)"); info("duration", album.duration)
+                    AlbumAudioSummary(album: album)
                     Button(t("album.open")) { model.open(album) }.frame(maxWidth: .infinity)
                 } else {
                     Image(systemName: "info.circle").font(.largeTitle).foregroundStyle(.tertiary).padding(.top, 50)

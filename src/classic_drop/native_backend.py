@@ -13,11 +13,13 @@ from uuid import uuid4
 from PIL import Image
 from PySide6.QtCore import QCoreApplication
 
+from classic_drop.audio_format import AudioFormat, inspect_audio_format
 from classic_drop.engine import ClassicDropEngine, PreviewEntry, RemovalReview
 from classic_drop.media import decode_cover
 from classic_drop.native_browser import NativeBrowserIndex, build_index
 from classic_drop.native_protocol import (
     AlbumDTO,
+    AudioFormatDTO,
     DeviceDTO,
     FacetDTO,
     PreviewDTO,
@@ -30,6 +32,7 @@ from classic_drop.native_protocol import (
 from classic_drop.removal import RemovalFilters, filter_music
 from iOpenPod.app.models.artwork import ArtworkRequest
 from iOpenPod.app.models.device import ActiveIPod, DeviceCandidateId
+from iOpenPod.app.playback.backend import PlaybackSourceError
 from iPodDB.library import ArtworkPixels, Track
 from storage import HostPath
 from storage.host_input import LocalHostFile
@@ -102,6 +105,7 @@ class NativeBackend:
         self.review_rows: tuple[TrackDTO, ...] = ()
         self.browser: NativeBrowserIndex | None = None
         self.browser_lock = Lock()
+        self.audio_formats: dict[int, AudioFormat] = {}
 
     def _sync(self) -> None:
         active = self.engine.coordinator.active_ipod
@@ -112,6 +116,7 @@ class NativeBackend:
             with self.browser_lock:
                 self.browser = None
             self.entries.clear()
+            self.audio_formats.clear()
             self.package.clear()
             self._invalidate_review()
 
@@ -197,6 +202,7 @@ class NativeBackend:
         image: str = "",
         count: int = 0,
         warnings: tuple[str, ...] = (),
+        audio_formats: tuple[AudioFormatDTO, ...] = (),
     ) -> Result:
         return Result(
             self.state(),
@@ -213,6 +219,7 @@ class NativeBackend:
             image,
             count,
             warnings,
+            audio_formats=audio_formats,
         )
 
     def execute(self, request: Request, cancelled: Event) -> Result:
@@ -228,6 +235,41 @@ class NativeBackend:
                 self._result(), gui_application=QCoreApplication.instance() is not None
             )
         self.engine._checkpoint(cancelled)
+        if command == "audio_formats":
+            current_tracks = {
+                str(t.track_id): t for t in self.engine.active.library.tracks
+            }
+            if (
+                not 1 <= len(request.ids) <= 8
+                or len(set(request.ids)) != len(request.ids)
+                or any(i not in current_tracks for i in request.ids)
+            ):
+                raise ValueError("Select 1–8 unique current Tracks")
+            observed: dict[int, AudioFormat] = {}
+            for value in request.ids:
+                self.engine._checkpoint(cancelled)
+                track = current_tracks[value]
+                if track.track_id in self.audio_formats:
+                    observed[track.track_id] = self.audio_formats[track.track_id]
+                    continue
+                try:
+                    source = self.engine.coordinator.open_playback_source(track)
+                    facts = inspect_audio_format(
+                        source, checkpoint=lambda: self.engine._checkpoint(cancelled)
+                    )
+                except PlaybackSourceError as error:
+                    facts = AudioFormat(detail=str(error))
+                observed[track.track_id] = facts
+            self.engine._checkpoint(cancelled)
+            self.audio_formats.update(observed)
+            return self._result(
+                audio_formats=tuple(
+                    AudioFormatDTO(
+                        str(i), f.codec, f.bit_depth, f.sample_rate_hz, f.detail
+                    )
+                    for i, f in observed.items()
+                )
+            )
         if command == "discover":
             # Passive discovery must not replace the Active iPod merely because
             # capacity changed: previews and Reviews bind to that exact object.
@@ -275,7 +317,11 @@ class NativeBackend:
             paths = tuple(e.path for e in self.entries.values()) + tuple(
                 Path(p) for p in request.paths
             )
-            entries = self.engine.preview(paths, cancelled)
+            entries = self.engine.preview(
+                paths,
+                cancelled,
+                allow_high_resolution_alac=request.allow_high_resolution_alac,
+            )
             old = self.entries
             self.entries = {e.token: old.get(e.token, e) for e in entries}
             self.revision = uuid4().hex

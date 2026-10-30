@@ -136,3 +136,15 @@
 "selection.count" = "%d 曲を選択（非表示の選択を含む）";
 "selection.clear" = "選択を解除";
 "browser.incomplete" = "ライブラリのキャッシュが不完全です。更新して再試行してください。";
+
+"audio.codec" = "コーデック";
+"audio.bit_depth" = "ビット深度";
+"audio.sample_rate" = "サンプルレート";
+"audio.loading" = "音声形式を読み取り中…";
+"audio.unknown" = "不明";
+"audio.unavailable" = "音声形式を読み取れませんでした";
+
+"alac.original" = "ALAC を変換せずに読み込む";
+"alac.original.on" = "ALAC の元のビット深度とサンプルレートを保持します。再生対応は iPod で確認してください。他の形式は通常のルールに従います。";
+"alac.original.off" = "オフ：通常の互換性ルールを使用し、上限を超える ALAC は 16-bit / 44.1 kHz ALAC に変換します。";
+"alac.original.locked" = "準備済みキューでは変更できません。キューを空にしてから設定を変更し、元のファイルを再追加してください。";

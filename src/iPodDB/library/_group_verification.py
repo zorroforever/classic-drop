@@ -419,7 +419,11 @@ def verify_browse_groups(
             value == 0
             if not composer_key
             else bool(value)
-            and (options == {value} if options else value not in old_ids | group_ids)
+            and (
+                options == {value}
+                if len(options) == 1
+                else value not in old_ids | group_ids
+            )
         )
         if composer_key:
             valid = (

@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from iPodDB.device_time import TimeConversion, unix_to_mac
 from iPodDB.iTunesDB.shared.chunk_defs.mhit import MhitHeader, header_size_for_version
+from iPodDB.iTunesDB.shared.field_converters import sample_rate_to_fixed
 from iPodDB.library._field_policy import DATE_FIELDS, METADATA_FIELDS, TRACK_FIELDS
 from iPodDB.library._native_values import (
     encode_media_types,
@@ -122,7 +123,7 @@ def track_field_expectations(
                 value, timezone_offset, utc=name == "release_date"
             )
     if changed("sample_rate_hz"):
-        expected["sample_rate_1"] = meta.sample_rate_hz << 16
+        expected["sample_rate_1"] = sample_rate_to_fixed(meta.sample_rate_hz)
     if changed("checked"):
         expected["checked_flag"] = int(not meta.checked)
     header_length = (

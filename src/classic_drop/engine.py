@@ -134,6 +134,7 @@ class ClassicDropEngine:
         self._resources = ExitStack()
         self._songs: dict[str, PreparedSong] = {}
         self._preview_active: ActiveIPod | None = None
+        self._preview_alac_original = False
         self.pending_recovery: str | None = None
         self._removal_review: RemovalReview | None = None
         self._entries: dict[Path, PreviewEntry] = {}
@@ -253,11 +254,19 @@ class ClassicDropEngine:
             )
 
     def preview(
-        self, paths: tuple[Path, ...], cancelled: Event
+        self,
+        paths: tuple[Path, ...],
+        cancelled: Event,
+        *,
+        allow_high_resolution_alac: bool = False,
     ) -> tuple[PreviewEntry, ...]:
         active = self.active
         if self._preview_active is not active:
             self.discard()
+        if self._entries and self._preview_alac_original != allow_high_resolution_alac:
+            raise ValueError(
+                "Clear the import queue before changing ALAC original import"
+            )
         self._preview_active = active
 
         def checkpoint() -> None:
@@ -291,6 +300,7 @@ class ClassicDropEngine:
                 device_root,
                 checkpoint,
                 batch,
+                allow_high_resolution_alac,
             )
 
     def _preview_sources(
@@ -303,6 +313,7 @@ class ClassicDropEngine:
         device_root: Path,
         checkpoint: Callable[[], None],
         batch: ExitStack,
+        allow_high_resolution_alac: bool,
     ) -> tuple[PreviewEntry, ...]:
         entries: list[PreviewEntry] = []
         songs: dict[str, PreparedSong] = {}
@@ -347,6 +358,7 @@ class ClassicDropEngine:
                         completed=index,
                         total=len(sources),
                     ),
+                    allow_high_resolution_alac=allow_high_resolution_alac,
                 )
                 song = prepared.song
                 sha = prepared.original.sha256
@@ -395,6 +407,7 @@ class ClassicDropEngine:
         self._resources.enter_context(batch.pop_all())
         self._songs.update(songs)
         self._entries = {entry.path: entry for entry in entries}
+        self._preview_alac_original = allow_high_resolution_alac
         return tuple(entries)
 
     def _media_progress(
@@ -859,6 +872,7 @@ class ClassicDropEngine:
         self._songs.clear()
         self._entries.clear()
         self._preview_active = None
+        self._preview_alac_original = False
 
     def close(self) -> None:
         self.discard()

@@ -37,6 +37,7 @@ final class AppModel: ObservableObject {
     @Published var closing = false
     @Published var cancelRequested = false
     @Published var error = ""
+    @Published var audioFormats: [String: AudioFormatDTO] = [:]
     @Published var images: [String: NSImage] = [:]
     @Published var query = ""
     @Published var albumMode = true
@@ -44,6 +45,7 @@ final class AppModel: ObservableObject {
     @Published var selectedAlbum: AlbumDTO?
     @Published var openAlbum: AlbumDTO?
     @Published var selectedTracks = Set<String>()
+    @Published private(set) var alacOriginalImport = false
     @Published var selectedQueue: String?
     @Published var selectedMatches = Set<String>()
     @Published var selectedPackage = Set<String>()
@@ -64,6 +66,7 @@ final class AppModel: ObservableObject {
         let command: String
         let generation: String
         let token: String?
+        let ids: [String]
         let epoch: Int
         let completion: ((ResultDTO) -> Void)?
     }
@@ -73,6 +76,10 @@ final class AppModel: ObservableObject {
     private var artworkPending: [String] = []
     private var artworkInFlight = Set<String>()
     private var imageOrder: [String] = []
+    private var audioDemand: [String: Int] = [:]
+    private var audioPending: [String] = []
+    private var audioRequested = Set<String>()
+    private var audioRequestID: String?
     private var browserEpoch = 0
     private var albumLoad = 0
     private var trackLoad = 0
@@ -124,10 +131,15 @@ final class AppModel: ObservableObject {
         configure(&request)
         if foreground { cancelRequested = false; task = TaskState(id: request.id, command: command) }
         if command == "prepare_browser" { preparationID = request.id }
-        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, epoch: browserEpoch, completion: completion)
+        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, ids: request.ids ?? [], epoch: browserEpoch, completion: completion)
+        if command == "audio_formats" { audioRequestID = request.id }
         do { try client.send(request) }
         catch {
             pending.removeValue(forKey: request.id)
+            if command == "audio_formats" {
+                audioRequestID = nil
+                for id in request.ids ?? [] { audioFormats[id] = AudioFormatDTO(id: id, detail: String(describing: error)) }
+            }
             if foreground { task?.finish(code: "failed", detail: String(describing: error)) }
             self.error = t("helper.unavailable") + "\n" + String(describing: error)
         }
@@ -141,17 +153,25 @@ final class AppModel: ObservableObject {
             return
         }
         guard let operation = pending.removeValue(forKey: envelope.id) else { return }
+        if envelope.id == audioRequestID { audioRequestID = nil }
         let artwork = ["artwork", "preview_artwork"].contains(operation.command)
         if artwork, let token = operation.token {
             let key = operation.command == "preview_artwork" ? "preview:\(token)" : token
             artworkInFlight.remove("\(operation.epoch):\(key)")
         }
-        defer { if artwork { dispatchArtwork() } }
+        defer {
+            if artwork { dispatchArtwork() }
+            dispatchAudioFormats()
+        }
         guard operation.epoch == browserEpoch else { return }
         let stateCommand = ["hello", "discover", "select", "commit", "delete", "restore", "eject"].contains(operation.command)
         if !stateCommand, let result = envelope.result, result.state.generation != state?.generation { return }
         if let result = envelope.result { apply(result.state) }
         if envelope.event == "error" {
+            if operation.command == "audio_formats" {
+                for id in operation.ids { audioFormats[id] = AudioFormatDTO(id: id, detail: envelope.detail) }
+                return
+            }
             if artwork { return }
             if operation.command == "hello" { perform("close") }
             if task?.id == envelope.id { task?.finish(code: envelope.code, detail: envelope.detail) }
@@ -188,6 +208,7 @@ final class AppModel: ObservableObject {
         allTracks = []; allAlbums = []; musicIDs = []
         if task?.command == "prepare_browser" { task = nil }
         albums = []; tracks = []; albumTracks = []; matches = []; package = []
+        audioFormats = [:]; audioDemand = [:]; audioPending = []; audioRequested = []
         images = [:]; imageOrder = []; requestedArtwork = []; artworkPending = []; artworkDemand = [:]
         selectedTracks = []; selectedMatches = []; selectedPackage = []
         openAlbum = nil; selectedAlbum = nil; review = nil
@@ -199,6 +220,7 @@ final class AppModel: ObservableObject {
         if let old = state, old.generation != new.generation {
             clearBrowser()
             queue = []; edits = [:]; selectedQueue = nil; dirty = []
+            alacOriginalImport = false
         }
         state = new
     }
@@ -225,7 +247,9 @@ final class AppModel: ObservableObject {
         }
         clearBrowser()
         artworkInFlight = []
+        audioRequestID = nil
         state = nil; queue = []; edits = [:]
+        alacOriginalImport = false
         error = t(unknownWrite ? "write.unknown" : "helper.stopped") + " (\(status))"
     }
 
@@ -363,7 +387,7 @@ final class AppModel: ObservableObject {
         browserPreparing = false; browserReady = true
         applyLibraryFilter()
         if task?.command == "prepare_browser" { task = nil }
-        dispatchArtwork()
+        dispatchArtwork(); dispatchAudioFormats()
     }
 
     func open(_ album: AlbumDTO) {
@@ -399,6 +423,41 @@ final class AppModel: ObservableObject {
     func addLibrarySelection() {
         guard browserReady, !busy, selectedMusicCount > 0 else { return }
         addToPackage(selectedTracks.intersection(musicIDs), source: t("library"))
+    }
+
+    func audioTrackIDs(for album: AlbumDTO) -> [String] {
+        allTracks.filter { $0.albumId == album.id }.map(\.id)
+    }
+
+    func acquireAudioFormats(_ ids: [String]) {
+        for id in ids {
+            audioDemand[id, default: 0] += 1
+            if audioFormats[id] == nil && !audioRequested.contains(id) && !audioPending.contains(id) {
+                audioPending.append(id)
+            }
+        }
+        dispatchAudioFormats()
+    }
+
+    func releaseAudioFormats(_ ids: [String]) {
+        for id in ids {
+            let remaining = (audioDemand[id] ?? 0) - 1
+            if remaining > 0 { audioDemand[id] = remaining }
+            else { audioDemand.removeValue(forKey: id); audioPending.removeAll { $0 == id } }
+        }
+    }
+
+    private func dispatchAudioFormats() {
+        guard ready, connected, browserReady, !busy, !closing, audioRequestID == nil else { return }
+        audioPending.removeAll { audioDemand[$0] == nil || audioFormats[$0] != nil || audioRequested.contains($0) }
+        let ids = Array(audioPending.prefix(8))
+        guard !ids.isEmpty else { return }
+        audioPending.removeFirst(ids.count)
+        audioRequested.formUnion(ids)
+        perform("audio_formats", configure: { $0.ids = ids }) { result in
+            let rows = Dictionary((result.audioFormats ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for id in ids { self.audioFormats[id] = rows[id] ?? AudioFormatDTO(id: id) }
+        }
     }
 
     func artwork(_ id: String, preview: Bool = false) {
@@ -455,11 +514,26 @@ final class AppModel: ObservableObject {
         panel.allowsMultipleSelection = true
         panel.begin { [weak self] response in
             guard response == .OK, let self else { return }
-            self.workspace = .incoming
-            self.saveEdits {
-                self.perform("preview", foreground: true, configure: { $0.paths = panel.urls.map(\.path) }) { result in
-                    self.loadQueue(first: result.preview ?? [], total: result.total ?? 0)
-                }
+            self.prepareImport(paths: panel.urls.map(\.path))
+        }
+    }
+
+    var canChangeAlacOriginalImport: Bool { ready && !busy && queue.isEmpty && !closing }
+
+    func setAlacOriginalImport(_ enabled: Bool) {
+        guard canChangeAlacOriginalImport else { return }
+        alacOriginalImport = enabled
+    }
+
+    func prepareImport(paths: [String]) {
+        guard writable, !paths.isEmpty else { return }
+        workspace = .incoming
+        let original = alacOriginalImport
+        saveEdits {
+            self.perform("preview", foreground: true, configure: {
+                $0.paths = paths; $0.allowHighResolutionAlac = original
+            }) { result in
+                self.loadQueue(first: result.preview ?? [], total: result.total ?? 0)
             }
         }
     }

@@ -40,6 +40,7 @@ class WaitingImporter(MusicImporter):
         profile: DeviceProfile,
         *,
         checkpoint: Callable[[], None],
+        allow_high_resolution_alac: bool = False,
     ) -> ImportedSong:
         self.entered.set()
         assert self.release.wait(5)

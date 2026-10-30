@@ -181,6 +181,18 @@ def reconcile_hidden(
     browse_ids.update(
         s.chunk.header.artist_id for s in document.find_chunks(MhiiHeader)
     )
+    # Removed members still supply historical candidates during this preparation.
+    # Do not recycle their identities into a supposedly fresh browse group.
+    browse_ids.update(
+        value
+        for track in original.tracks
+        if track.ipod is not None
+        for value in (
+            track.ipod.album_id,
+            track.ipod.artist_id_ref,
+            track.ipod.composer_id,
+        )
+    )
     browse_allocator = IdentityAllocator(browse_ids, 32)
     sql_allocator = IdentityAllocator(
         (
@@ -513,18 +525,10 @@ def _composers(
             continue
         key = track.metadata.composer.casefold()
         options = candidates.get(key, set())
-        if len(options) > 1:
-            issues.append(
-                WriteIssue(
-                    "library.ambiguous_composer",
-                    "The changed composer has conflicting native identities.",
-                    subject="track",
-                    record_id=track.track_id,
-                    field="metadata.composer",
-                )
-            )
-            continue
-        value = next(iter(options), 0)
+        # Historical writers may assign several IDs to the same display name.
+        # Preserve those Tracks; a changed/new member gets a fresh group rather
+        # than guessing which historical identity the name denotes.
+        value = next(iter(options)) if len(options) == 1 else 0
         if key and not value:
             value = allocator.take()
             candidates[key] = {value}

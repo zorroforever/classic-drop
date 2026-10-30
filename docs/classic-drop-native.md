@@ -50,7 +50,7 @@ thumbnails at most 512 KiB. Browse commands return one generation-bound page.
 Removal Review pages additionally require the retained Review token.
 
 `hello`, `discover`, `select`, `validate`, `eject`, `prepare_browser`, `tracks`, `albums`, `facets`,
-`artwork`, `preview`, `queue`, `edit`, `preview_artwork`, `cover`, `clear_cover`,
+`artwork`, `audio_formats`, `preview`, `queue`, `edit`, `preview_artwork`, `cover`, `clear_cover`,
 `discard`, `commit`, `filter`, `package`, `package_add`, `package_remove`,
 `package_clear`, `prepare_delete`, `review`, `delete`, `restore`, `keep`, `cancel` and
 `close` form the native adapter's command surface. The engine and Storage retain
@@ -131,3 +131,40 @@ through Storage. Failures are suppressed until physical reconnect or manual
 refresh; explicit ejection suppresses automatic remount until physical reconnect.
 See ADR-0179 and ADR-0180. The retained Qt application is a separate entry; launch
 this native bundle explicitly when testing the Liquid Glass interface.
+
+## Actual audio format display
+
+The Track list and Album detail table show codec, bit depth and sample rate.
+Album cards summarize all members of the Album, including members hidden by search;
+different values are listed separately. A partially observed Album shows a loading
+label, and unreadable members remain explicitly unknown. AAC and MP3 bit depth is
+not applicable and displays “—”; MP4 sample-size placeholders are not treated as
+lossless precision.
+
+Visible rows and Album summaries request actual encoded headers on demand through
+identity-bound Playback Sources. The serial engine worker handles at most eight
+unique Track IDs per request, with one physical format request outstanding in the
+native shell. Each file has a 1 MiB read budget, 64 KiB maximum physical reads and
+an operation limit; large media payloads and metadata padding are skipped. Results,
+including unreadable files, are cached only for the current Library generation.
+Leaving a view drops unsent work; stale replies cannot populate a new generation.
+The pure metadata index does not read media files.
+
+This display observes existing files, including high-resolution ALAC, without
+applying import compatibility rules. It neither changes import/transcoding policy
+nor establishes what a particular iPod firmware can play.
+
+## Original ALAC import option
+
+Before adding files, open **To Import** and enable **Import ALAC without conversion**
+to retain ALAC source bytes, bit depth and sample rate. The switch starts off on
+each launch. Off retains the existing compatibility rules, including conversion of
+higher-resolution lossless input to 16-bit / 44.1 kHz ALAC. Other formats follow
+their existing rules in both modes. Playback support is confirmed on the iPod.
+
+The option is fixed for the prepared queue and locked while preparing/importing.
+To change it, clear the queue and add the original source files again. Files already
+imported are unaffected. Invalid or unsupported ALAC inputs fail rather than being
+silently converted when original import is selected. The protocol field
+`allow_high_resolution_alac` is a strict boolean on `preview`, defaulting to false;
+commit uses the retained prepared result. See ADR-0182.

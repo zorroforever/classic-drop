@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 
 import pytest
@@ -8,7 +9,7 @@ from iOpenPod.app.display_text import SourceText, source_text
 from iPodDB.iTunesDB.writer.signature import verify_hash58
 from iPodDB.library import CoverFormat, CoverPixelFormat, IPodLibrary
 from tests.classic_drop.test_media import media_file
-from tests.iOpenPod.app.services.test_library_resources import build_device
+from tests.iOpenPod.app.services.test_library_resources import Device, build_device
 
 
 @pytest.fixture
@@ -238,3 +239,58 @@ def test_non_classic_is_rejected_before_selection(tmp_path):
             engine.select(device.coordinator.discovery.candidates[0].id)
     finally:
         engine.close()
+
+
+@pytest.mark.parametrize("rate", [96000, 192000])
+def test_original_alac_commit_keeps_bytes_and_high_resolution_metadata(
+    connected: tuple[Device, ClassicDropEngine], tmp_path: Path, rate: int
+) -> None:
+    from tests.classic_drop.test_audio_format import encoded_audio
+
+    device, engine = connected
+    source = tmp_path / "hires.m4a"
+    source.write_bytes(encoded_audio(tmp_path, "alac", rate, 24))
+    before = source.read_bytes()
+    entries = engine.preview((source,), Event(), allow_high_resolution_alac=True)
+    assert entries[0].selected and entries[0].mode == "copy"
+    engine.commit(entries, Event())
+    added = engine.active.library.tracks[-1]
+    assert added.metadata.sample_rate_hz == rate
+    assert (device.root / added.metadata.location).read_bytes() == before
+    parsed = IPodLibrary((device.root / "iPod_Control/iTunes/iTunesDB").read_bytes())
+    assert parsed.snapshot.tracks[-1].metadata.sample_rate_hz == rate
+    assert (
+        parsed.serialize().itunes
+        == (device.root / "iPod_Control/iTunes/iTunesDB").read_bytes()
+    )
+
+
+def test_alac_policy_cannot_change_a_retained_preview(
+    connected: tuple[Device, ClassicDropEngine], tmp_path: Path
+) -> None:
+    _device, engine = connected
+    source = media_file(tmp_path)
+    entries = engine.preview((source,), Event())
+    with pytest.raises(ValueError, match=r"[Cc]lear"):
+        engine.preview((source,), Event(), allow_high_resolution_alac=True)
+    assert engine.preview((source,), Event()) == entries
+    engine.discard()
+    assert engine.preview((source,), Event(), allow_high_resolution_alac=True)[
+        0
+    ].selected
+
+
+def test_original_alac_commit_rejects_changed_host_source(
+    connected: tuple[Device, ClassicDropEngine], tmp_path: Path
+) -> None:
+    from tests.classic_drop.test_audio_format import encoded_audio
+
+    device, engine = connected
+    source = tmp_path / "hires.m4a"
+    source.write_bytes(encoded_audio(tmp_path, "alac", 96000, 24))
+    entries = engine.preview((source,), Event(), allow_high_resolution_alac=True)
+    database = (device.root / "iPod_Control/iTunes/iTunesDB").read_bytes()
+    source.write_bytes(source.read_bytes() + b"changed")
+    with pytest.raises(ValueError, match="File changed"):
+        engine.commit(entries, Event())
+    assert (device.root / "iPod_Control/iTunes/iTunesDB").read_bytes() == database

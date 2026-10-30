@@ -15,6 +15,7 @@ import pytest
 from classic_drop.engine import ClassicDropEngine, PreviewEntry
 from classic_drop.native_backend import NativeBackend
 from classic_drop.native_protocol import Result
+from tests.classic_drop.test_audio_format import encoded_audio
 from tests.classic_drop.test_engine import connected  # noqa: F401
 from tests.classic_drop.test_media import media_file
 from tests.iOpenPod.app.services.test_library_resources import Device
@@ -33,6 +34,168 @@ def call(backend: NativeBackend, command: str, **kwargs: Any) -> Result:
     return backend.execute(
         Request("test", command, generation=backend.generation, **kwargs), Event()
     )
+
+
+def test_audio_formats_inspect_real_files_read_only_and_cache_by_generation(
+    backend: NativeBackend,
+    connected: tuple[Device, ClassicDropEngine],  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    device, engine = connected
+    track = engine.active.library.tracks[0]
+    path = device.root / track.metadata.location
+    path.write_bytes(encoded_audio(tmp_path, "alac", 96000, 24))
+    before = {
+        p.relative_to(device.root): p.read_bytes()
+        for p in device.root.rglob("*")
+        if p.is_file()
+    }
+
+    result = call(backend, "audio_formats", ids=(str(track.track_id),))
+
+    row = result.audio_formats[0]
+    assert (row.id, row.codec, row.bit_depth, row.sample_rate_hz) == (
+        str(track.track_id),
+        "ALAC",
+        24,
+        96000,
+    )
+    assert before == {
+        p.relative_to(device.root): p.read_bytes()
+        for p in device.root.rglob("*")
+        if p.is_file()
+    }
+    original = engine.coordinator.open_playback_source
+
+    def unexpected_read(*_args: object) -> None:
+        raise AssertionError("Cached audio facts were reread")
+
+    monkeypatch.setattr(engine.coordinator, "open_playback_source", unexpected_read)
+    assert (
+        call(backend, "audio_formats", ids=(str(track.track_id),)).audio_formats
+        == result.audio_formats
+    )
+    monkeypatch.setattr(engine.coordinator, "open_playback_source", original)
+    engine.select(engine.discover()[0].id)
+    backend.state()
+    path.write_bytes(encoded_audio(tmp_path, "aac", 48000, 16))
+    row = call(backend, "audio_formats", ids=(str(track.track_id),)).audio_formats[0]
+    assert (row.codec, row.bit_depth, row.sample_rate_hz) == ("AAC", None, 48000)
+
+
+def test_audio_formats_validate_entire_batch_before_opening_files(
+    backend: NativeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_read(*_args: object) -> None:
+        raise AssertionError("Invalid request opened device media")
+
+    monkeypatch.setattr(
+        backend.engine.coordinator, "open_playback_source", unexpected_read
+    )
+    track = backend.engine.active.library.tracks[0]
+    for ids in [(), (str(track.track_id), "missing"), (str(track.track_id),) * 9]:
+        with pytest.raises(ValueError):
+            call(backend, "audio_formats", ids=ids)
+
+
+def test_unreadable_audio_is_unknown_and_does_not_fail_other_rows(
+    backend: NativeBackend,
+) -> None:
+    ids = tuple(str(t.track_id) for t in backend.engine.active.library.tracks)
+    rows = call(backend, "audio_formats", ids=ids).audio_formats
+    assert len(rows) == len(ids)
+    assert all(
+        r.codec == "" and r.bit_depth is None and r.sample_rate_hz is None and r.detail
+        for r in rows
+    )
+
+
+def test_audio_formats_cancelled_batch_is_not_cached(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from classic_drop.engine import OperationCancelledError
+    from classic_drop.native_protocol import Request
+    from iOpenPod.app.playback.backend import PlaybackSourceError
+
+    cancelled = Event()
+
+    def source(*_args: object) -> None:
+        cancelled.set()
+        raise PlaybackSourceError("missing")
+
+    monkeypatch.setattr(backend.engine.coordinator, "open_playback_source", source)
+    track = backend.engine.active.library.tracks[0]
+    request = Request(
+        "cancel-test",
+        "audio_formats",
+        generation=backend.generation,
+        ids=(str(track.track_id),),
+    )
+    with pytest.raises(OperationCancelledError):
+        backend.execute(request, cancelled)
+    assert not backend.audio_formats
+
+
+def test_audio_formats_stale_generation_cannot_open_files(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from classic_drop.native_protocol import Request
+
+    def source(*_args: object) -> None:
+        raise AssertionError("Stale request opened media")
+
+    monkeypatch.setattr(backend.engine.coordinator, "open_playback_source", source)
+    with pytest.raises(ValueError, match="generation expired"):
+        backend.execute(
+            Request("stale", "audio_formats", generation="old", ids=("1",)), Event()
+        )
+
+
+def test_original_alac_native_preview_binds_option_and_keeps_source_bytes(
+    backend: NativeBackend, tmp_path: Path
+) -> None:
+    from classic_drop.native_protocol import Request
+
+    source = tmp_path / "hires.m4a"
+    source.write_bytes(encoded_audio(tmp_path, "alac", 96000, 24))
+    wire = json.dumps(
+        {
+            "version": 1,
+            "id": "alac",
+            "command": "preview",
+            "generation": backend.generation,
+            "paths": [str(source)],
+            "allow_high_resolution_alac": True,
+        }
+    ).encode()
+    result = backend.execute(Request.decode(wire), Event())
+    assert result.preview[0].mode == "copy"
+    assert result.preview[0].selected
+    with pytest.raises(ValueError, match=r"[Cc]lear"):
+        call(backend, "preview", paths=(str(source),))
+    result = call(backend, "queue")
+    assert result.preview[0].mode == "copy"
+    call(backend, "discard")
+    result = call(backend, "preview", paths=(str(source),))
+    assert result.preview[0].mode == "convert"
+
+
+@pytest.mark.parametrize("value", ["true", 1, None, [], {}])
+def test_alac_protocol_option_requires_a_boolean(value: object) -> None:
+    from classic_drop.native_protocol import Request
+
+    wire = json.dumps(
+        {
+            "version": 1,
+            "id": "alac",
+            "command": "preview",
+            "allow_high_resolution_alac": value,
+        }
+    ).encode()
+    with pytest.raises(ValueError):
+        Request.decode(wire)
 
 
 def test_keep_completed_removal_preserves_files_and_current_package_after_preferences_change(
@@ -403,7 +566,11 @@ def test_cancel_reader_reaches_a_busy_serial_worker(tmp_path: Path) -> None:
 
     class SlowEngine(ClassicDropEngine):
         def preview(
-            self, paths: tuple[Path, ...], cancelled: Event
+            self,
+            paths: tuple[Path, ...],
+            cancelled: Event,
+            *,
+            allow_high_resolution_alac: bool = False,
         ) -> tuple[PreviewEntry, ...]:
             self.progress(WriteProgress("inspect", "Inspecting a long file"))
             started.set()

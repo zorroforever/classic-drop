@@ -136,3 +136,15 @@
 "selection.count" = "%d selected (including hidden selections)";
 "selection.clear" = "Clear selection";
 "browser.incomplete" = "The library cache is incomplete. Refresh to try again.";
+
+"audio.codec" = "Codec";
+"audio.bit_depth" = "Bit depth";
+"audio.sample_rate" = "Sample rate";
+"audio.loading" = "Reading audio format…";
+"audio.unknown" = "Unknown";
+"audio.unavailable" = "Audio format could not be read";
+
+"alac.original" = "Import ALAC without conversion";
+"alac.original.on" = "Keep the original ALAC bit depth and sample rate. Playback support depends on your iPod; other formats follow the usual rules.";
+"alac.original.off" = "Off: ALAC follows the current compatibility rules; higher specifications are converted to 16-bit / 44.1 kHz ALAC.";
+"alac.original.locked" = "This option is fixed for the prepared queue. Clear the queue to change it, then add the source files again.";

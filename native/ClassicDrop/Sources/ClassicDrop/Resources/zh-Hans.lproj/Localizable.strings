@@ -136,3 +136,15 @@
 "selection.count" = "已选 %d 首（包含隐藏选择）";
 "selection.clear" = "取消全部选择";
 "browser.incomplete" = "资料库缓存不完整，请刷新后重试。";
+
+"audio.codec" = "编码";
+"audio.bit_depth" = "位深";
+"audio.sample_rate" = "采样率";
+"audio.loading" = "读取音频格式…";
+"audio.unknown" = "未知";
+"audio.unavailable" = "无法读取音频格式";
+
+"alac.original" = "ALAC 原样导入（不转换）";
+"alac.original.on" = "保留 ALAC 原文件的位深和采样率，播放兼容性由你测试；其他格式沿用原规则。";
+"alac.original.off" = "已关闭：ALAC 沿用当前兼容规则，超出限制时转换为 16-bit / 44.1 kHz ALAC。";
+"alac.original.locked" = "此选项已绑定待导入清单。需更改时先清空清单，再重新添加源文件。";
