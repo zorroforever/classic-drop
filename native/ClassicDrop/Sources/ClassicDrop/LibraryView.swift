@@ -6,20 +6,36 @@ struct LibraryView: View {
     @EnvironmentObject var strings: Strings
     private func t(_ key: String) -> String { strings.text(key) }
     var body: some View {
-        ZStack {
-            if model.albumMode {
-                grid.opacity(model.openAlbum == nil ? 1 : 0)
-                    .allowsHitTesting(model.openAlbum == nil).accessibilityHidden(model.openAlbum != nil)
-            } else {
-                VStack(spacing: 0) {
-                    TrackTable(tracks: model.tracks, selection: $model.selectedTracks)
-                    if model.tracks.count < model.trackTotal {
-                        Button(t("load.more")) { model.loadTracks(more: true) }.padding(10)
+        VStack(spacing: 0) {
+            if model.browserReady {
+                HStack(spacing: 12) {
+                    Text(String(format: t("selection.count"), model.selectedTracks.count)).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if !model.selectedTracks.isEmpty {
+                        Button(t("selection.clear")) { model.selectedTracks = [] }.disabled(model.busy)
                     }
-                }
+                    Button { model.addLibrarySelection() } label: { Label(t("package.add"), systemImage: "text.badge.minus") }
+                        .disabled(model.busy || model.selectedMusicCount == 0)
+                }.padding(.horizontal, 24).padding(.vertical, 10)
+                Divider()
             }
             if let album = model.openAlbum { detail(album) }
+            else if model.albumMode { grid }
+            else { TrackTable(tracks: model.tracks, selection: selection(model.tracks)) }
         }
+        .overlay {
+            if model.browserPreparing {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text(t("browser.preparing")).font(.headline)
+                }.padding(24).modifier(NavigationMaterial())
+            }
+        }
+    }
+    private func selection(_ rows: [TrackDTO]) -> Binding<Set<String>> {
+        let visible = Set(rows.map(\.id))
+        return Binding(get: { model.selectedTracks.intersection(visible) },
+                       set: { model.replaceVisibleSelection($0, visible: visible) })
     }
     private var grid: some View {
         ScrollView {
@@ -58,16 +74,13 @@ struct LibraryView: View {
                         .accessibilityLabel(album.title + ", " + album.artist)
                     }
                 }
-                if model.albums.count < model.albumTotal {
-                    Button(t("load.more")) { model.loadAlbums(more: true) }.frame(maxWidth: .infinity)
-                }
             }.padding(24)
         }
     }
     private func detail(_ album: AlbumDTO) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Button { model.openAlbum = nil; model.selectedTracks = [] } label: { Label(t("albums"), systemImage: "chevron.left") }
+                Button { model.openAlbum = nil } label: { Label(t("albums"), systemImage: "chevron.left") }
                 Spacer()
                 Text(t("library") + " / " + album.artist + " / " + album.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -81,10 +94,7 @@ struct LibraryView: View {
                 }
                 Spacer()
             }
-            TrackTable(tracks: model.albumTracks, selection: $model.selectedTracks)
-            if model.albumTracks.count < model.detailTotal {
-                Button(t("load.more")) { model.loadDetail(more: true) }
-            }
+            TrackTable(tracks: model.albumTracks, selection: selection(model.albumTracks))
         }.padding(24).background(Color(nsColor: .textBackgroundColor))
     }
 }

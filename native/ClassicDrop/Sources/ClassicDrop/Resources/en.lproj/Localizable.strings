@@ -124,3 +124,11 @@
 "empty.library" = "There is no music in this Library yet";
 "select.all" = "Select All Ready Items";
 "deselect.all" = "Deselect All";
+
+"browser.preparing" = "Preparing the complete music library…";
+"browser.index" = "Indexing all Track metadata";
+"browser.loading" = "Caching all Tracks";
+"operation.prepare_browser" = "Preparing the music library";
+"selection.count" = "%d selected (including hidden selections)";
+"selection.clear" = "Clear selection";
+"browser.incomplete" = "The library cache is incomplete. Refresh to try again.";

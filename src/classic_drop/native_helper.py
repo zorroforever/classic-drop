@@ -17,6 +17,7 @@ from typing import BinaryIO, TextIO
 
 from classic_drop.engine import ClassicDropEngine, OperationCancelledError
 from classic_drop.native_backend import NativeBackend
+from classic_drop.native_browser import build_index
 from classic_drop.native_protocol import (
     MAX_MESSAGE,
     Envelope,
@@ -76,6 +77,7 @@ class HelperServer:
         self.generation = ""
         self.seen: set[str] = set()
         self.output_failed = Event()
+        self.preparations: list[Thread] = []
 
     def emit(
         self,
@@ -145,6 +147,8 @@ class HelperServer:
         try:
             self._serve(engine)
         finally:
+            for preparation in self.preparations:
+                preparation.join()
             engine.close()
 
     def _serve(self, engine: ClassicDropEngine) -> None:
@@ -165,11 +169,16 @@ class HelperServer:
                     pending = None
                     last_time, last_phase = now, value.phase
 
+            preparation_started = False
             engine.progress = report
             try:
                 if request.command == "close":
                     self.emit(request.id, "result", result=backend._result())
                     return
+                if request.command == "prepare_browser":
+                    self._prepare_browser(backend, request, cancelled)
+                    preparation_started = True
+                    continue
                 result = backend.execute(request, cancelled)
                 self.generation = backend.generation
                 if pending:
@@ -198,8 +207,62 @@ class HelperServer:
                 )
             finally:
                 with self.lock:
-                    self.events.pop(request.id, None)
+                    if not preparation_started:
+                        self.events.pop(request.id, None)
                 self.queue.task_done()
+
+    def _prepare_browser(
+        self, backend: NativeBackend, request: Request, cancelled: Event
+    ) -> None:
+        active, generation, result = backend.browser_source(request)
+
+        def run() -> None:
+            last_percent = -1
+
+            def report(completed: int, total: int) -> None:
+                nonlocal last_percent
+                percent = completed * 100 // max(1, total)
+                if percent != last_percent:
+                    last_percent = percent
+                    self.emit(
+                        request.id,
+                        "progress",
+                        progress=ProgressDTO(
+                            "browser.index",
+                            "Preparing complete Library metadata",
+                            completed,
+                            total,
+                            "",
+                            "tracks",
+                            percent / 100,
+                            "stage",
+                        ),
+                    )
+
+            try:
+                index = build_index(active.library, cancelled, report)
+                if not backend.publish_browser(active, generation, index, cancelled):
+                    raise InterruptedError("Browser preparation cancelled")
+                self.emit(request.id, "result", result=result)
+            except Exception as error:
+                self.emit(
+                    request.id,
+                    "error",
+                    code="cancelled"
+                    if cancelled.is_set() or isinstance(error, InterruptedError)
+                    else "operation_failed",
+                    detail=str(error),
+                )
+            finally:
+                with self.lock:
+                    self.events.pop(request.id, None)
+
+        thread = Thread(target=run, name="classic-drop-browser")
+        self.preparations = [
+            worker for worker in self.preparations if worker.is_alive()
+        ]
+        self.preparations.append(thread)
+        thread.start()
 
     def run(self, stream: BinaryIO) -> None:
         worker = Thread(target=self.run_worker, name="classic-drop-engine")

@@ -25,6 +25,8 @@ from storage.models import (
     PhysicalDevice,
     PhysicalDeviceId,
     ScsiVpdPagePlan,
+    UnmountedVolumeCandidate,
+    UnmountedVolumeDiscoveryResult,
     Volume,
     VolumeId,
     VolumeObservation,
@@ -36,6 +38,8 @@ from storage.platform.macos_vpd import probe_macos_scsi
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from storage.platform.macos_mount import MountTarget
 
 _VOLUMES_DIRECTORY = Path("/Volumes")
 _ATTR_CMN_RETURNED_ATTRS = 0x80000000
@@ -140,6 +144,7 @@ class _GetAttrListFunction(Protocol):
 class MacOSPlatformAdapter:
     def __init__(self) -> None:
         self._device_ejector = MacOSDeviceEjector()
+        self._mount_candidates: dict[str, MountTarget] = {}
 
     @property
     def name(self) -> str:
@@ -167,6 +172,17 @@ class MacOSPlatformAdapter:
             if observation.physical_device.removable:
                 observations.append(observation)
         return ObservationDiscoveryResult(tuple(observations), tuple(issues))
+
+    def discover_unmounted(self) -> UnmountedVolumeDiscoveryResult:
+        from storage.platform.macos_mount import discover_unmounted
+
+        self._mount_candidates.clear()
+        return discover_unmounted(self)
+
+    def mount(self, candidate: UnmountedVolumeCandidate) -> VolumeObservation:
+        from storage.platform.macos_mount import mount
+
+        return mount(self, candidate)
 
     def inspect(self, mount_point: Path) -> VolumeObservation:
         return self._inspect_full(mount_point, _ioreg_hardware_index())

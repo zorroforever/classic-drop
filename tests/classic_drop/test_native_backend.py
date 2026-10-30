@@ -360,3 +360,162 @@ def test_cancel_reader_reaches_a_busy_serial_worker(tmp_path: Path) -> None:
         writer.close()
         stream.close()
     assert not thread.is_alive()
+
+
+def test_native_browser_searches_all_metadata_and_album_members(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    active = backend.engine.active
+    tracks = tuple(
+        replace(
+            t,
+            show="Hidden Show",
+            metadata=replace(t.metadata, composer="Hidden Composer"),
+        )
+        for t in active.library.tracks
+    )
+    updated = replace(active, library=replace(active.library, tracks=tracks))
+    connection = backend.engine.coordinator._active
+    assert connection is not None
+    monkeypatch.setattr(connection, "active_ipod", updated)
+    backend.state()
+    assert call(backend, "tracks", query="Hidden Composer").total == len(tracks)
+    assert call(backend, "albums", query="Hidden Show").albums
+    assert call(backend, "tracks", query="Hidden Show").total == len(tracks)
+
+
+def test_browser_pages_adapt_to_large_metadata(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import asdict
+
+    from classic_drop.native_protocol import MAX_MESSAGE, Envelope
+
+    active = backend.engine.active
+    tracks = tuple(
+        replace(t, metadata=replace(t.metadata, lyrics="界" * 180000))
+        for t in active.library.tracks
+    )
+    connection = backend.engine.coordinator._active
+    assert connection is not None
+    monkeypatch.setattr(
+        connection,
+        "active_ipod",
+        replace(active, library=replace(active.library, tracks=tracks)),
+    )
+    backend.state()
+    page = call(backend, "tracks")
+    assert len(page.tracks) == 1
+    assert (
+        len(
+            json.dumps(
+                asdict(Envelope("test", "result", backend.generation, 1, result=page)),
+                ensure_ascii=False,
+            ).encode()
+        )
+        < MAX_MESSAGE
+    )
+    assert "界" * 180000 in page.tracks[0].search_text
+    assert call(backend, "tracks", offset=1).tracks[0].id != page.tracks[0].id
+
+
+def test_album_pages_adapt_without_losing_library_members(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import asdict
+
+    from classic_drop.native_protocol import MAX_MESSAGE, Envelope
+
+    active = backend.engine.active
+    tracks = tuple(
+        replace(
+            active.library.tracks[0], track_id=i + 1, album=f"{i:03d}" + "界" * 3000
+        )
+        for i in range(200)
+    )
+    connection = backend.engine.coordinator._active
+    assert connection is not None
+    monkeypatch.setattr(
+        connection,
+        "active_ipod",
+        replace(active, library=replace(active.library, tracks=tracks)),
+    )
+    backend.state()
+    seen: list[str] = []
+    while len(seen) < 200:
+        page = call(backend, "albums", offset=len(seen))
+        assert page.total == 200
+        assert page.albums
+        assert (
+            len(
+                json.dumps(
+                    asdict(
+                        Envelope("test", "result", backend.generation, 1, result=page)
+                    ),
+                    ensure_ascii=False,
+                ).encode()
+            )
+            < MAX_MESSAGE
+        )
+        seen.extend(album.title for album in page.albums)
+    assert seen == [f"{i:03d}" + "界" * 3000 for i in range(200)]
+
+
+def test_single_oversized_album_reports_incomplete_cache(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    active = backend.engine.active
+    track = replace(active.library.tracks[0], album="界" * 400000)
+    connection = backend.engine.coordinator._active
+    assert connection is not None
+    monkeypatch.setattr(
+        connection,
+        "active_ipod",
+        replace(active, library=replace(active.library, tracks=(track,))),
+    )
+    backend.state()
+    with pytest.raises(ValueError, match="Album metadata record"):
+        call(backend, "albums")
+
+
+def test_async_browser_keeps_discovery_responsive_and_rejects_late_index(
+    backend: NativeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    connected: tuple[Device, ClassicDropEngine],  # noqa: F811
+) -> None:
+    from classic_drop.native_browser import build_index
+    from classic_drop.native_helper import HelperServer
+    from classic_drop.native_protocol import Request
+
+    started, release = Event(), Event()
+
+    def slow(snapshot: Any, cancelled: Event, progress: Any) -> Any:
+        started.set()
+        assert release.wait(5)
+        return build_index(snapshot, Event(), progress)
+
+    monkeypatch.setattr("classic_drop.native_helper.build_index", slow)
+    output = io.StringIO()
+    server = HelperServer(output, None)
+    event = Event()
+    server.events["prepare"] = event
+    request = Request("prepare", "prepare_browser", generation=backend.generation)
+    server._prepare_browser(backend, request, event)
+    try:
+        assert started.wait(3)
+        before = backend.generation
+        assert call(backend, "discover").state.generation == before
+        connected[0].platform.disconnect(connected[0].root)
+        call(backend, "discover")
+        release.set()
+        server.preparations[0].join(3)
+        assert backend.browser is None
+        assert any(
+            m["id"] == "prepare" and m["code"] == "cancelled"
+            for m in map(json.loads, output.getvalue().splitlines())
+        )
+        assert "prepare" not in server.events
+    finally:
+        release.set()
+        for thread in server.preparations:
+            thread.join(5)

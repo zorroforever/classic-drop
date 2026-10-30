@@ -124,3 +124,11 @@
 "empty.library" = "曲库中还没有音乐";
 "select.all" = "全选可导入项";
 "deselect.all" = "取消全选";
+
+"browser.preparing" = "正在缓存完整音乐资料库…";
+"browser.index" = "正在索引全部歌曲信息";
+"browser.loading" = "正在缓存全部歌曲";
+"operation.prepare_browser" = "正在准备音乐资料库";
+"selection.count" = "已选 %d 首（包含隐藏选择）";
+"selection.clear" = "取消全部选择";
+"browser.incomplete" = "资料库缓存不完整，请刷新后重试。";

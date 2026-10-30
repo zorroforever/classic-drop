@@ -251,3 +251,5 @@ What becomes easier, harder, required, or prohibited?
 - [ADR-0176: Use a native Qt workspace shell for Classic Drop](0176-use-a-native-qt-workspace-shell-for-classic-drop.md)
 - [ADR-0177: Recoverable Track removal in Classic Drop](0177-classic-drop-recoverable-track-removal.md)
 - [ADR-0178: Use SwiftUI with a headless Classic Drop helper](0178-use-a-swiftui-shell-with-a-headless-classic-drop-helper.md)
+- [ADR-0179: Cache the complete native Library per generation](0179-cache-the-complete-native-library-per-generation.md)
+- [ADR-0180: Automatically mount qualified macOS iPod Classics](0180-mount-qualified-ipod-volumes-through-storage.md)

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import base64
 import io
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from uuid import uuid4
 
 from PIL import Image
@@ -14,6 +15,7 @@ from PySide6.QtCore import QCoreApplication
 
 from classic_drop.engine import ClassicDropEngine, PreviewEntry, RemovalReview
 from classic_drop.media import decode_cover
+from classic_drop.native_browser import NativeBrowserIndex, build_index
 from classic_drop.native_protocol import (
     AlbumDTO,
     DeviceDTO,
@@ -33,7 +35,7 @@ from storage import HostPath
 from storage.host_input import LocalHostFile
 
 
-def track_dto(track: Track, source: str = "") -> TrackDTO:
+def track_dto(track: Track, source: str = "", search: str = "") -> TrackDTO:
     return TrackDTO(
         str(track.track_id),
         track.title,
@@ -49,6 +51,8 @@ def track_dto(track: Track, source: str = "") -> TrackDTO:
         track.size_bytes,
         str(track.artwork_id),
         source,
+        track.media_kind.value,
+        search,
     )
 
 
@@ -96,6 +100,8 @@ class NativeBackend:
         self.review: RemovalReview | None = None
         self.review_token = ""
         self.review_rows: tuple[TrackDTO, ...] = ()
+        self.browser: NativeBrowserIndex | None = None
+        self.browser_lock = Lock()
 
     def _sync(self) -> None:
         active = self.engine.coordinator.active_ipod
@@ -103,9 +109,34 @@ class NativeBackend:
             self._active = active
             self.generation = uuid4().hex
             self.revision = uuid4().hex
+            with self.browser_lock:
+                self.browser = None
             self.entries.clear()
             self.package.clear()
             self._invalidate_review()
+
+    def browser_source(self, request: Request) -> tuple[ActiveIPod, str, Result]:
+        self._sync()
+        if request.generation != self.generation:
+            raise ValueError("The device or Library generation expired; reload")
+        return self.engine.active, self.generation, self._result()
+
+    def publish_browser(
+        self,
+        active: ActiveIPod,
+        generation: str,
+        index: NativeBrowserIndex,
+        cancelled: Event,
+    ) -> bool:
+        with self.browser_lock:
+            if (
+                cancelled.is_set()
+                or active is not self._active
+                or generation != self.generation
+            ):
+                return False
+            self.browser = index
+            return True
 
     def _invalidate_review(self) -> None:
         self.review = None
@@ -198,8 +229,11 @@ class NativeBackend:
             # Passive discovery must not replace the Active iPod merely because
             # capacity changed: previews and Reviews bind to that exact object.
             # Storage still invalidates disconnected Filesystem Sessions.
-            devices = self.engine.discover(refresh_known=False)
+            devices = self.engine.discover(
+                refresh_known=False, automatic=request.source != "manual"
+            )
             return self._result(
+                warnings=tuple(str(issue.detail) for issue in devices.mount_issues),
                 devices=tuple(
                     DeviceDTO(
                         c.id.value,
@@ -210,7 +244,7 @@ class NativeBackend:
                         c.total_bytes,
                     )
                     for c in devices
-                )
+                ),
             )
         if command == "select":
             self.engine.select(DeviceCandidateId(request.token))
@@ -288,7 +322,7 @@ class NativeBackend:
             )
             return self._result(image=thumbnail(pixels))
         if command in {"tracks", "albums", "facets", "filter", "package"}:
-            return self._browse(request)
+            return self._browse(request, cancelled)
         if command in {"package_add", "package_remove", "package_clear"}:
             tracks = {t.track_id: t for t in self.engine.active.library.tracks}
             ids = tuple(int(value) for value in request.ids)
@@ -408,8 +442,11 @@ class NativeBackend:
             offset=request.offset,
         )
 
-    def _browse(self, request: Request) -> Result:
+    def _browse(self, request: Request, cancelled: Event) -> Result:
         snapshot = self.engine.active.library
+        if self.browser is None:
+            self.browser = build_index(snapshot, cancelled)
+        browser = self.browser
         if request.command == "facets":
             return self._result(
                 genres=tuple(sorted({t.genre for t in snapshot.tracks})),
@@ -433,7 +470,7 @@ class NativeBackend:
         elif request.command == "package":
             tracks = tuple(t for t in snapshot.tracks if t.track_id in self.package)
         else:
-            tracks = tuple(t for t in snapshot.tracks if t.media_kind.value == "music")
+            tracks = browser.tracks
         if request.command == "albums":
             groups: dict[str, list[Track]] = {}
             for track in tracks:
@@ -448,9 +485,9 @@ class NativeBackend:
                     )
                 )
                 first = members[0]
-                if (
-                    request.query.casefold()
-                    not in f"{first.album} {first.effective_album_artist}".casefold()
+                if not any(
+                    request.query.casefold().strip() in browser.search[t.track_id]
+                    for t in members
                 ):
                     continue
                 albums.append(
@@ -467,21 +504,31 @@ class NativeBackend:
                     )
                 )
             albums.sort(key=lambda a: (a.title.casefold(), a.artist.casefold()))
+            fitted_albums: list[AlbumDTO] = []
+            album_size = 0
+            for album_row in albums[request.offset : request.offset + request.limit]:
+                row_size = len(
+                    json.dumps(asdict(album_row), ensure_ascii=False).encode("utf-8")
+                )
+                if album_size + row_size > 900_000:
+                    if not fitted_albums:
+                        raise ValueError(
+                            "An Album metadata record exceeds the native transport limit"
+                        )
+                    break
+                fitted_albums.append(album_row)
+                album_size += row_size
             return self._result(
-                albums=tuple(albums[request.offset : request.offset + request.limit]),
+                albums=tuple(fitted_albums),
                 total=len(albums),
                 offset=request.offset,
             )
         if request.album:
             tracks = tuple(t for t in tracks if t.album_key == request.album)
-        query = request.query.casefold()
+        query = request.query.casefold().strip()
         tracks = tuple(
             sorted(
-                (
-                    t
-                    for t in tracks
-                    if query in f"{t.title} {t.artist} {t.album}".casefold()
-                ),
+                (t for t in tracks if query in browser.search[t.track_id]),
                 key=lambda t: (
                     t.album_key,
                     t.metadata.disc_number,
@@ -490,11 +537,27 @@ class NativeBackend:
                 ),
             )
         )
+        page = tuple(
+            track_dto(
+                t,
+                self.package.get(t.track_id, ""),
+                browser.search[t.track_id] if request.command == "tracks" else "",
+            )
+            for t in tracks[request.offset : request.offset + request.limit]
+        )
+        # Leave room for state, envelope and JSON escaping without truncating metadata.
+        fitted: list[TrackDTO] = []
+        size = 0
+        for row in page:
+            row_size = len(json.dumps(asdict(row), ensure_ascii=False).encode("utf-8"))
+            if size + row_size > 900_000:
+                if not fitted:
+                    raise ValueError(
+                        "A Track metadata record exceeds the native transport limit"
+                    )
+                break
+            fitted.append(row)
+            size += row_size
         return self._result(
-            tracks=tuple(
-                track_dto(t, self.package.get(t.track_id, ""))
-                for t in tracks[request.offset : request.offset + request.limit]
-            ),
-            total=len(tracks),
-            offset=request.offset,
+            tracks=tuple(fitted), total=len(tracks), offset=request.offset
         )

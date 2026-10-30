@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from functools import partial
@@ -30,6 +30,7 @@ from iOpenPod.app.models.device import (
     ActiveIPod,
     DeviceCandidate,
     DeviceCandidateId,
+    DeviceMountIssue,
     DeviceReadiness,
 )
 from iOpenPod.app.services.device_coordinator import (
@@ -39,7 +40,7 @@ from iOpenPod.app.services.device_coordinator import (
     SyncRecoveryRestoredError,
 )
 from iPodDB.library import ArtworkPixels, LibrarySnapshot
-from storage import DevicePath, HostPath, Storage, capture_host_file
+from storage import DevicePath, HostPath, PhysicalDeviceId, Storage, capture_host_file
 
 
 class OperationCancelledError(Exception):
@@ -80,6 +81,21 @@ class DeleteResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassicDropDiscovery:
+    candidates: tuple[DeviceCandidate, ...]
+    mount_issues: tuple[DeviceMountIssue, ...] = ()
+
+    def __iter__(self) -> Iterator[DeviceCandidate]:
+        return iter(self.candidates)
+
+    def __len__(self) -> int:
+        return len(self.candidates)
+
+    def __getitem__(self, index: int) -> DeviceCandidate:
+        return self.candidates[index]
+
+
+@dataclass(frozen=True, slots=True)
 class RemovalReview:
     source: ActiveIPod
     track_ids: tuple[int, ...]
@@ -114,6 +130,8 @@ class ClassicDropEngine:
         self.pending_recovery: str | None = None
         self._removal_review: RemovalReview | None = None
         self._entries: dict[Path, PreviewEntry] = {}
+        self._failed_mounts: dict[PhysicalDeviceId, DeviceMountIssue] = {}
+        self._ejected_devices: set[PhysicalDeviceId] = set()
 
     @property
     def active(self) -> ActiveIPod:
@@ -122,14 +140,37 @@ class ClassicDropEngine:
             raise ValueError(source_text("Select an iPod Classic first"))
         return active
 
-    def discover(self, *, refresh_known: bool = True) -> tuple[DeviceCandidate, ...]:
-        return tuple(
+    def discover(
+        self, *, automatic: bool = False, refresh_known: bool = True
+    ) -> ClassicDropDiscovery:
+        excluded = self._ejected_devices | (
+            set(self._failed_mounts) if automatic else set()
+        )
+        if not automatic:
+            self._failed_mounts.clear()
+        inventory = self.coordinator.mount_identified_ipod_classics(frozenset(excluded))
+        present = {device.id for device in inventory.observed_devices}
+        if inventory.inventory_complete:
+            self._failed_mounts = {
+                key: issue
+                for key, issue in self._failed_mounts.items()
+                if key in present
+            }
+            self._ejected_devices.intersection_update(present)
+        for issue in inventory.issues:
+            if issue.physical_device_id is not None:
+                self._failed_mounts[issue.physical_device_id] = issue
+        candidates = tuple(
             c
             for c in self.coordinator.discover_devices(
                 refresh_known=refresh_known
             ).candidates
             if c.profile is not None and c.profile.family == "iPod Classic"
         )
+        issues = tuple(self._failed_mounts.values()) + tuple(
+            issue for issue in inventory.issues if issue.physical_device_id is None
+        )
+        return ClassicDropDiscovery(candidates, issues)
 
     def select(self, candidate_id: DeviceCandidateId) -> ActiveIPod:
         self._require_no_pending_recovery()
@@ -779,7 +820,10 @@ class ClassicDropEngine:
         return self.select(candidate)
 
     def eject(self) -> None:
+        physical_id = self.coordinator.active_physical_device_id
         self.coordinator.eject_active_ipod(self.active)
+        if physical_id is not None:
+            self._ejected_devices.add(physical_id)
         self.discard()
 
     def discard(self) -> None:

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
-from storage.errors import MountInspectionError
+from storage.errors import MountInspectionError, StorageMountError
 from storage.models import (
     DeviceBus,
     DiscoveryIssue,
@@ -28,6 +28,8 @@ from storage.models import (
     PhysicalDevice,
     PhysicalDeviceId,
     ScsiVpdPagePlan,
+    UnmountedVolumeCandidate,
+    UnmountedVolumeDiscoveryResult,
     Volume,
     VolumeId,
     VolumeObservation,
@@ -137,6 +139,16 @@ def parse_udev_properties(content: str) -> dict[str, str]:
 
 
 class LinuxPlatformAdapter:
+    def discover_unmounted(self) -> UnmountedVolumeDiscoveryResult:
+        return UnmountedVolumeDiscoveryResult(
+            issues=(
+                DiscoveryIssue("mount", "Automatic mounting is unavailable on Linux"),
+            )
+        )
+
+    def mount(self, candidate: UnmountedVolumeCandidate) -> VolumeObservation:
+        raise StorageMountError("Automatic mounting is unavailable on Linux")
+
     def __init__(self) -> None:
         self._device_ejector = LinuxDeviceEjector()
         self._identity_lock = threading.Lock()

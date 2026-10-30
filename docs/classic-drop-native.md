@@ -49,7 +49,7 @@ Protocol version 1 uses stdin/stdout JSON Lines; diagnostics use stderr and
 thumbnails at most 512 KiB. Browse commands return one generation-bound page.
 Removal Review pages additionally require the retained Review token.
 
-`hello`, `discover`, `select`, `validate`, `eject`, `tracks`, `albums`, `facets`,
+`hello`, `discover`, `select`, `validate`, `eject`, `prepare_browser`, `tracks`, `albums`, `facets`,
 `artwork`, `preview`, `queue`, `edit`, `preview_artwork`, `cover`, `clear_cover`,
 `discard`, `commit`, `filter`, `package`, `package_add`, `package_remove`,
 `package_clear`, `prepare_delete`, `review`, `delete`, `restore`, `cancel` and
@@ -88,3 +88,29 @@ older system. The development Host is Apple Silicon macOS 26.5.2. macOS 27
 materials, Intel, older-system runtime, VoiceOver, accessibility display options
 and physical iPod playback/cover/recovery remain acceptance checks. Synthetic
 library screenshots and virtual device writes do not establish hardware success.
+
+## Complete native Library cache
+
+Selecting an Active iPod prepares a generation-bound index of all retained Track
+metadata on a cancellable, pure-metadata thread. The engine worker remains available
+for passive disconnect discovery. Swift automatically transfers all Track and Album
+pages with progress before enabling Library actions, then searches the retained
+in-memory metadata locally. Search includes composer, genre, show, dates, lyrics
+and other searchable Track/TrackMetadata fields; it does not read media files.
+Pages shrink to fit the bounded transport without truncating search data. A single
+record exceeding the transport allowance reports an incomplete cache rather than
+publishing partial results as complete.
+
+Track-ID selection is shared by the list and Album details and survives search,
+view changes and returning to the Album grid. The selection count includes hidden
+rows. Add to removal package accepts the Music subset in bounded batches;
+it does not delete files. Disconnect, device switch, canceled preparation and helper
+loss invalidate the cache and selection. A reconnected device builds a fresh cache.
+Artwork demand belongs to visible views, with at most two physical requests and a
+128-image cache; hidden pending work is dropped.
+
+On macOS, discovery can mount a filesystem volume positively qualified as an iPod
+through Storage. Failures are suppressed until physical reconnect or manual
+refresh; explicit ejection suppresses automatic remount until physical reconnect.
+See ADR-0179 and ADR-0180. The retained Qt application is a separate entry; launch
+this native bundle explicitly when testing the Liquid Glass interface.

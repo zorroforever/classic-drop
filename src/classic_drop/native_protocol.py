@@ -134,6 +134,8 @@ class TrackDTO:
     size_bytes: int
     artwork_id: str
     source: str = ""
+    media_kind: str = "music"
+    search_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)

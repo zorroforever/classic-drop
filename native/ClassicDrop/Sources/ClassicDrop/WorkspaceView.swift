@@ -170,6 +170,8 @@ struct CoverView: View {
     var id: String
     var preview = false
     var radius: CGFloat = 12
+    @State private var acquired: String?
+    private var requestKey: String { preview ? "preview:\(id)" : id }
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: radius).fill(Color(nsColor: .quaternaryLabelColor).opacity(0.25))
@@ -181,9 +183,21 @@ struct CoverView: View {
         }
         .aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: radius))
         .accessibilityHidden(true)
-        .onAppear { model.artwork(id, preview: preview) }
-        .onChange(of: id) { _ in model.artwork(id, preview: preview) }
-        .onChange(of: model.busy) { busy in if !busy { model.artwork(id, preview: preview) } }
+        .onAppear { acquire() }
+        .onDisappear { release() }
+        .onChange(of: requestKey) { _ in release(); acquire() }
+        .onChange(of: model.state?.generation) { _ in acquired = nil; acquire() }
+        .onChange(of: model.busy) { busy in if !busy { model.resumeArtwork() } }
+    }
+    private func acquire() {
+        guard acquired == nil else { return }
+        acquired = requestKey; model.artwork(id, preview: preview)
+    }
+    private func release() {
+        guard let key = acquired else { return }
+        let isPreview = key.hasPrefix("preview:")
+        model.releaseArtwork(isPreview ? String(key.dropFirst(8)) : key, preview: isPreview)
+        acquired = nil
     }
 }
 

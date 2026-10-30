@@ -15,6 +15,8 @@ if TYPE_CHECKING:
         HardwareProbeResult,
         PhysicalDeviceId,
         ScsiVpdPagePlan,
+        UnmountedVolumeCandidate,
+        UnmountedVolumeDiscoveryResult,
         VolumeObservation,
     )
 
@@ -36,6 +38,10 @@ class PlatformAdapter(Protocol):
     def name(self) -> str: ...
 
     def discover(self) -> ObservationDiscoveryResult: ...
+
+    def discover_unmounted(self) -> UnmountedVolumeDiscoveryResult: ...
+
+    def mount(self, candidate: UnmountedVolumeCandidate) -> VolumeObservation: ...
 
     def inspect(self, mount_point: Path) -> VolumeObservation: ...
 

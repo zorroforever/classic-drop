@@ -84,6 +84,12 @@ public struct TrackDTO: Decodable, Identifiable, Hashable {
     public let year, trackNumber, discNumber, lengthMs: Int
     public let sizeBytes: Int64
     public let artworkId, source: String
+    public let mediaKind: String?
+    public let searchText: String?
+    public var searchable: String {
+        (searchText ?? [title, artist, album, albumArtist, genre, String(year)].joined(separator: " "))
+            .folding(options: [.caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+    }
     public var duration: String { durationText(lengthMs) }
 }
 

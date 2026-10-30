@@ -55,7 +55,9 @@ iPod に入っている音楽を残したまま、アルバムを数枚すばや
 - 開発作業には `uv`。
 - 変換が必要な形式をインポートする場合は、`PATH` 上の `ffmpeg` と `ffprobe`。
 
-Finder に iPod が表示されていれば、Classic Drop でデバイスを確認できます。同時に別のアプリから iPod のデータベースへ書き込まないでください。Finder の自動処理によってボリュームが取り出されたりロックされたりする場合があります。管理アプリは一度に一つだけ使用し、接続を外す前に安全に取り出してください。
+ネイティブアプリは、接続後に対応する iPod Classic のボリュームを自動でマウントします。
+Finder で先に開く必要はありません。同時に別のアプリから iPod のデータベースへ書き込まないでください。
+管理アプリは一度に一つだけ使用し、接続を外す前に安全に取り出してください。
 
 ## 開発版のインストール
 
@@ -63,12 +65,22 @@ Finder に iPod が表示されていれば、Classic Drop でデバイスを確
 git clone https://github.com/zorroforever/classic-drop.git
 cd classic-drop
 uv sync --locked
-uv run classic-drop
 ```
 
 現在は主にソースコードとして配布されています。署名・公証済みの正式なインストーラはまだ公開されていません。
 
 ## macOS アプリのビルド
+
+Liquid Glass の新しい UI は SwiftUI を使用し、開発ビルドには GUI のない
+Python helper が含まれます。次のコマンドでネイティブアプリを起動します。
+
+```shell
+uv run python scripts/build_classic_drop_native.py
+open "dist/native/Classic Drop.app"
+```
+
+ビルド設定、プロトコル、実機検証の制限は[ネイティブアプリの文書](docs/classic-drop-native.md)を参照してください。
+`uv run classic-drop` と次のビルドは、比較用に保持した Qt の画面を起動します。
 
 ```shell
 uv sync --locked
@@ -80,7 +92,7 @@ open "dist/Classic Drop.app"
 
 ## 基本的な使い方
 
-1. iPod を接続し、macOS がマウントするまで待ちます。
+1. iPod を接続します。ネイティブアプリは対応するボリュームを自動で検出・マウントします。
 2. Classic Drop を開きます。デバイスが表示されない場合は **Refresh（更新）** を選びます。
 3. iPod を選択します。**iPod Library（iPod ライブラリ）** ワークスペースは読み取り専用で、曲一覧またはアルバム表示で検索できます。ワークスペースの切り替えにはサイドバーを使います。
 4. **To Import（インポート対象）** を開き、ファイルまたはフォルダを追加して、検出されたメタデータとアートワークを確認します。

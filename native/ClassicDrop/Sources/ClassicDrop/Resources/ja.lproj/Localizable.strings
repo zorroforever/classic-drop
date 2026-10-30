@@ -124,3 +124,11 @@
 "empty.library" = "ライブラリにはまだ音楽がありません";
 "select.all" = "読み込み可能な項目をすべて選択";
 "deselect.all" = "選択をすべて解除";
+
+"browser.preparing" = "ライブラリ全体を準備中…";
+"browser.index" = "全トラックの情報を索引中";
+"browser.loading" = "全トラックをキャッシュ中";
+"operation.prepare_browser" = "ライブラリを準備中";
+"selection.count" = "%d 曲を選択（非表示の選択を含む）";
+"selection.clear" = "選択を解除";
+"browser.incomplete" = "ライブラリのキャッシュが不完全です。更新して再試行してください。";

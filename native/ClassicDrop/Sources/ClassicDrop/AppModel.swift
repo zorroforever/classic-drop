@@ -31,6 +31,8 @@ final class AppModel: ObservableObject {
     @Published var years: [Int] = []
     @Published var playlists: [FacetDTO] = []
     @Published var task: TaskState?
+    @Published var browserPreparing = false
+    @Published var browserReady = false
     @Published var ready = false
     @Published var closing = false
     @Published var cancelRequested = false
@@ -62,10 +64,26 @@ final class AppModel: ObservableObject {
         let command: String
         let generation: String
         let token: String?
+        let epoch: Int
         let completion: ((ResultDTO) -> Void)?
     }
     private var pending: [String: Pending] = [:]
     private var requestedArtwork = Set<String>()
+    private var artworkDemand: [String: Int] = [:]
+    private var artworkPending: [String] = []
+    private var artworkInFlight = Set<String>()
+    private var imageOrder: [String] = []
+    private var browserEpoch = 0
+    private var albumLoad = 0
+    private var trackLoad = 0
+    private var detailLoad = 0
+    private var preparationID: String?
+    private var allTracks: [TrackDTO] = []
+    private var allAlbums: [AlbumDTO] = []
+    private var musicIDs = Set<String>()
+    private var tracksLoaded = false
+    private var albumsLoaded = false
+
     private var dirty = Set<String>()
     private var searchWork: DispatchWorkItem?
     private var monitor: Timer?
@@ -81,7 +99,7 @@ final class AppModel: ObservableObject {
         client.onExit = { [weak self] status in self?.helperExited(status) }
         do {
             try client.start()
-            perform("hello") { [weak self] _ in
+            perform("hello", configure: { _ in }) { [weak self] _ in
                 self?.ready = true
                 self?.discover(foreground: false)
             }
@@ -89,27 +107,24 @@ final class AppModel: ObservableObject {
         monitor?.invalidate()
         monitor = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.ready, !self.busy, !self.closing,
+                guard let self, self.ready, (!self.busy || self.browserPreparing), !self.closing,
                       !self.pending.values.contains(where: { $0.command == "discover" }) else { return }
                 self.discover(foreground: false, refreshLibrary: false)
             }
         }
     }
 
-    func perform(_ command: String, foreground: Bool = false, completion: ((ResultDTO) -> Void)? = nil) {
-        perform(command, foreground: foreground, configure: { _ in }, completion: completion)
-    }
-
     func perform(_ command: String, foreground: Bool = false,
-                 configure: (inout RequestDTO) -> Void,
-                 completion: ((ResultDTO) -> Void)? = nil) {
+                 configure: (inout RequestDTO) -> Void = { _ in },
+                 completion: @escaping (ResultDTO) -> Void = { _ in }) {
         guard !closing || command == "close" else { return }
         if foreground && busy { return }
         var request = RequestDTO(command, generation: state?.generation ?? "")
         request.revision = state?.revision
         configure(&request)
         if foreground { cancelRequested = false; task = TaskState(id: request.id, command: command) }
-        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, completion: completion)
+        if command == "prepare_browser" { preparationID = request.id }
+        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, epoch: browserEpoch, completion: completion)
         do { try client.send(request) }
         catch {
             pending.removeValue(forKey: request.id)
@@ -120,17 +135,31 @@ final class AppModel: ObservableObject {
 
     private func receive(_ envelope: Envelope) {
         if envelope.event == "progress", let progress = envelope.progress {
-            task?.receive(id: envelope.id, sequence: envelope.sequence, progress: progress)
+            if let operation = pending[envelope.id], operation.epoch == browserEpoch {
+                task?.receive(id: envelope.id, sequence: envelope.sequence, progress: progress)
+            }
             return
         }
         guard let operation = pending.removeValue(forKey: envelope.id) else { return }
+        let artwork = ["artwork", "preview_artwork"].contains(operation.command)
+        if artwork, let token = operation.token {
+            let key = operation.command == "preview_artwork" ? "preview:\(token)" : token
+            artworkInFlight.remove("\(operation.epoch):\(key)")
+        }
+        defer { if artwork { dispatchArtwork() } }
+        guard operation.epoch == browserEpoch else { return }
+        let stateCommand = ["hello", "discover", "select", "commit", "delete", "restore", "eject"].contains(operation.command)
+        if !stateCommand, let result = envelope.result, result.state.generation != state?.generation { return }
         if let result = envelope.result { apply(result.state) }
         if envelope.event == "error" {
-            if ["artwork", "preview_artwork"].contains(operation.command), let token = operation.token {
-                requestedArtwork.remove(operation.command == "preview_artwork" ? "preview:\(token)" : token)
-            }
+            if artwork { return }
             if operation.command == "hello" { perform("close") }
             if task?.id == envelope.id { task?.finish(code: envelope.code, detail: envelope.detail) }
+            if browserPreparing && ["prepare_browser", "tracks", "albums"].contains(operation.command) {
+                clearBrowser()
+                task = TaskState(id: envelope.id, command: "prepare_browser")
+                task?.finish(code: envelope.code, detail: envelope.detail)
+            }
             if envelope.code != "cancelled" { error = envelope.detail }
             if envelope.code == "recovery_required" { workspace = .recovery }
             return
@@ -138,20 +167,38 @@ final class AppModel: ObservableObject {
         guard envelope.event == "result", let result = envelope.result else { return }
         if task?.id == envelope.id {
             let warnings = result.warnings ?? []
-            task?.finish(code: warnings.isEmpty ? "success" : "warning",
-                         detail: completionText(operation.command, result: result))
+            if operation.command != "prepare_browser" {
+                task?.finish(code: warnings.isEmpty ? "success" : "warning",
+                             detail: completionText(operation.command, result: result))
+            }
             if !warnings.isEmpty { error = warnings.joined(separator: "\n") }
         }
         operation.completion?(result)
     }
 
+    private func clearBrowser() {
+        if let id = preparationID {
+            var cancel = RequestDTO("cancel"); cancel.token = id
+            try? client.send(cancel)
+        }
+        preparationID = nil
+        browserEpoch += 1
+        browserPreparing = false; browserReady = false
+        tracksLoaded = false; albumsLoaded = false
+        allTracks = []; allAlbums = []; musicIDs = []
+        if task?.command == "prepare_browser" { task = nil }
+        albums = []; tracks = []; albumTracks = []; matches = []; package = []
+        images = [:]; imageOrder = []; requestedArtwork = []; artworkPending = []; artworkDemand = [:]
+        selectedTracks = []; selectedMatches = []; selectedPackage = []
+        openAlbum = nil; selectedAlbum = nil; review = nil
+        albumTotal = 0; trackTotal = 0; detailTotal = 0; matchTotal = 0
+        albumLoad += 1; trackLoad += 1; detailLoad += 1
+    }
+
     private func apply(_ new: StateDTO) {
         if let old = state, old.generation != new.generation {
-            albums = []; tracks = []; albumTracks = []; queue = []; edits = [:]
-            matches = []; package = []; images = [:]; requestedArtwork = []
-            selectedTracks = []; selectedMatches = []; selectedPackage = []
-            selectedQueue = nil; openAlbum = nil; selectedAlbum = nil; review = nil; dirty = []
-            albumTotal = 0; trackTotal = 0; detailTotal = 0; matchTotal = 0
+            clearBrowser()
+            queue = []; edits = [:]; selectedQueue = nil; dirty = []
         }
         state = new
     }
@@ -174,7 +221,9 @@ final class AppModel: ObservableObject {
             unknownWrite = ["commit", "delete", "restore"].contains(task?.command ?? "")
             task?.finish(code: unknownWrite ? "unknown" : "failed", detail: t(unknownWrite ? "write.unknown" : "helper.stopped"))
         }
-        state = nil; queue = []; edits = [:]; albums = []; tracks = []; package = []; review = nil
+        clearBrowser()
+        artworkInFlight = []
+        state = nil; queue = []; edits = [:]
         error = t(unknownWrite ? "write.unknown" : "helper.stopped") + " (\(status))"
     }
 
@@ -190,6 +239,15 @@ final class AppModel: ObservableObject {
 
     var helperRunning: Bool { client.running }
     func cancel() {
+        if browserPreparing {
+            if let id = preparationID {
+                var request = RequestDTO("cancel"); request.token = id
+                try? client.send(request)
+            }
+            clearBrowser()
+            task?.finish(code: "cancelled", detail: t("cancelled"))
+            return
+        }
         guard let task, task.running else { return }
         var request = RequestDTO("cancel"); request.token = task.id
         try? client.send(request)
@@ -198,8 +256,9 @@ final class AppModel: ObservableObject {
 
     func discover(foreground: Bool = true, refreshLibrary: Bool = true) {
         let generation = state?.generation
-        perform("discover", foreground: foreground) {
+        perform("discover", foreground: foreground, configure: { $0.source = foreground ? "manual" : "automatic" }) {
             self.devices = $0.devices ?? []
+            if let warnings = $0.warnings, !warnings.isEmpty { self.error = warnings.joined(separator: "\n") }
             if self.connected && (refreshLibrary || generation != self.state?.generation) {
                 self.refresh()
             }
@@ -207,18 +266,28 @@ final class AppModel: ObservableObject {
     }
 
     func select(_ id: String) {
+        guard !busy || browserPreparing else { return }
+        clearBrowser()
+        task = nil
         perform("select", foreground: true, configure: { $0.token = id }) { _ in self.refresh() }
     }
 
     func refresh() {
         guard connected else { return }
-        loadAlbums(); loadTracks(); loadFacets(); filter(); loadPackage()
+        if browserReady { applyLibraryFilter(); loadFacets(); filter(); loadPackage(); return }
+        guard !browserPreparing, !busy else { return }
+        browserPreparing = true
+        perform("prepare_browser", foreground: true, configure: { _ in }) { _ in
+            self.preparationID = nil
+            self.loadAlbums(); self.loadTracks()
+            self.loadFacets(); self.filter(); self.loadPackage()
+        }
     }
 
     func searchChanged() {
         searchWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
+            guard let self, self.browserReady else { return }
             if self.workspace == .library {
                 if self.openAlbum != nil { self.loadDetail() }
                 else if self.albumMode { self.loadAlbums() } else { self.loadTracks() }
@@ -229,47 +298,144 @@ final class AppModel: ObservableObject {
     }
 
     func loadAlbums(more: Bool = false) {
-        let offset = more ? albums.count : 0, query = self.query
-        perform("albums", configure: { $0.offset = offset; $0.query = query }) { result in
-            guard query == self.query else { return }
-            self.albums = (more ? self.albums : []) + (result.albums ?? [])
-            self.albumTotal = result.total ?? 0
+        albumLoad += 1
+        if browserReady { applyLibraryFilter(); return }
+        let load = albumLoad, epoch = browserEpoch, query = ""
+        var rows: [AlbumDTO] = []
+        func next(_ offset: Int) {
+            self.perform("albums", configure: { $0.offset = offset; $0.query = query }) { result in
+                guard self.browserEpoch == epoch, self.albumLoad == load else { return }
+                let page = result.albums ?? []
+                rows += page
+                let total = result.total ?? rows.count
+                guard self.validBrowserPage(offset: result.offset ?? offset, expected: offset, count: page.count, accumulated: rows.count, total: total) else { return }
+                if rows.count < total && !page.isEmpty { next(rows.count) }
+                else {
+                    self.allAlbums = rows; self.albums = rows; self.albumTotal = total
+                    self.albumsLoaded = true; self.finishBrowserPreparation()
+                }
+            }
         }
+        next(0)
     }
 
     func loadTracks(more: Bool = false) {
-        let offset = more ? tracks.count : 0, query = self.query
-        perform("tracks", configure: { $0.offset = offset; $0.query = query }) { result in
-            guard query == self.query else { return }
-            self.tracks = (more ? self.tracks : []) + (result.tracks ?? [])
-            self.trackTotal = result.total ?? 0
+        trackLoad += 1
+        if browserReady { applyLibraryFilter(); return }
+        let load = trackLoad, epoch = browserEpoch, query = ""
+        var rows: [TrackDTO] = []
+        func next(_ offset: Int) {
+            self.perform("tracks", configure: { $0.offset = offset; $0.query = query }) { result in
+                guard self.browserEpoch == epoch, self.trackLoad == load else { return }
+                let page = result.tracks ?? []
+                rows += page
+                let total = result.total ?? rows.count
+                guard self.validBrowserPage(offset: result.offset ?? offset, expected: offset, count: page.count, accumulated: rows.count, total: total) else { return }
+                if self.browserPreparing {
+                    var progress = ProgressDTO(phase: "browser.loading", fraction: total > 0 ? Double(rows.count) / Double(total) : 1)
+                    progress.completed = rows.count; progress.total = total
+                    self.task?.receive(id: self.task?.id ?? "", sequence: rows.count + 1_000_000, progress: progress)
+                }
+                if rows.count < total && !page.isEmpty { next(rows.count) }
+                else {
+                    self.allTracks = rows; self.tracks = rows; self.trackTotal = total
+                    self.musicIDs = Set(rows.filter { $0.mediaKind == "music" }.map(\.id))
+                    self.tracksLoaded = true; self.finishBrowserPreparation()
+                }
+            }
         }
+        next(0)
+    }
+
+    private func validBrowserPage(offset: Int, expected: Int, count: Int, accumulated: Int, total: Int) -> Bool {
+        guard offset == expected, total >= accumulated, count > 0 || accumulated == total else {
+            clearBrowser()
+            error = t("browser.incomplete")
+            return false
+        }
+        return true
+    }
+
+    private func finishBrowserPreparation() {
+        guard browserPreparing, tracksLoaded, albumsLoaded else { return }
+        browserPreparing = false; browserReady = true
+        applyLibraryFilter()
+        if task?.command == "prepare_browser" { task = nil }
+        dispatchArtwork()
     }
 
     func open(_ album: AlbumDTO) {
-        selectedAlbum = album; openAlbum = album; selectedTracks = []; loadDetail()
+        selectedAlbum = album; openAlbum = album; loadDetail()
     }
 
-    func loadDetail(more: Bool = false) {
-        guard let album = openAlbum else { return }
-        let offset = more ? albumTracks.count : 0, query = self.query
-        perform("tracks", configure: { $0.album = album.id; $0.offset = offset; $0.query = query }) { result in
-            guard self.openAlbum?.id == album.id, query == self.query else { return }
-            self.albumTracks = (more ? self.albumTracks : []) + (result.tracks ?? [])
-            self.detailTotal = result.total ?? 0
-        }
+    func loadDetail(more: Bool = false) { applyLibraryFilter() }
+
+    private func applyLibraryFilter() {
+        guard browserReady else { return }
+        let needle = query.folding(options: [.caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let filtered = needle.isEmpty ? allTracks : allTracks.filter { $0.searchable.contains(needle) }
+        tracks = filtered; trackTotal = filtered.count
+        let albumIDs = Set(filtered.map(\.albumId))
+        albums = allAlbums.filter { albumIDs.contains($0.id) }; albumTotal = albums.count
+        albumTracks = filtered.filter { $0.albumId == openAlbum?.id }; detailTotal = albumTracks.count
+    }
+
+    func replaceVisibleSelection(_ selected: Set<String>, visible: Set<String>) {
+        selectedTracks.subtract(visible)
+        selectedTracks.formUnion(selected.intersection(visible))
+    }
+
+    var selectedMusicCount: Int { selectedTracks.intersection(musicIDs).count }
+    func addLibrarySelection() {
+        guard browserReady, !busy, selectedMusicCount > 0 else { return }
+        addToPackage(selectedTracks.intersection(musicIDs), source: t("library"))
     }
 
     func artwork(_ id: String, preview: Bool = false) {
         let key = preview ? "preview:\(id)" : id
-        guard ready, connected, !busy, id != "0", !id.isEmpty,
-              images[key] == nil, !requestedArtwork.contains(key) else { return }
-        requestedArtwork.insert(key)
-        perform(preview ? "preview_artwork" : "artwork", configure: { $0.token = id }) { result in
-            self.requestedArtwork.remove(key)
-            if let text = result.image, let data = Data(base64Encoded: text), let image = NSImage(data: data) {
-                if self.images.count >= 200 { self.images.removeAll() }
-                self.images[key] = image
+        guard id != "0", !id.isEmpty else { return }
+        artworkDemand[key, default: 0] += 1
+        if images[key] == nil, !artworkInFlight.contains("\(browserEpoch):\(key)"), !artworkPending.contains(key) {
+            requestedArtwork.remove(key)
+        }
+        if images[key] == nil, !requestedArtwork.contains(key) {
+            requestedArtwork.insert(key); artworkPending.append(key)
+        }
+        dispatchArtwork()
+    }
+
+    func releaseArtwork(_ id: String, preview: Bool = false) {
+        let key = preview ? "preview:\(id)" : id
+        let remaining = (artworkDemand[key] ?? 0) - 1
+        if remaining > 0 { artworkDemand[key] = remaining; return }
+        artworkDemand.removeValue(forKey: key)
+        if artworkPending.contains(key) {
+            artworkPending.removeAll { $0 == key }; requestedArtwork.remove(key)
+        }
+    }
+
+    func resumeArtwork() { dispatchArtwork() }
+
+    private func dispatchArtwork() {
+        guard ready, connected, !busy, !browserPreparing else { return }
+        while artworkInFlight.count < 2, !artworkPending.isEmpty {
+            let key = artworkPending.removeFirst()
+            guard artworkDemand[key] != nil else { requestedArtwork.remove(key); continue }
+            let preview = key.hasPrefix("preview:")
+            let id = preview ? String(key.dropFirst(8)) : key
+            let epoch = browserEpoch
+            artworkInFlight.insert("\(epoch):\(key)")
+            perform(preview ? "preview_artwork" : "artwork", configure: { $0.token = id }) { result in
+                guard epoch == self.browserEpoch else { return }
+                if let text = result.image, let data = Data(base64Encoded: text), let image = NSImage(data: data) {
+                    self.images[key] = image
+                    self.imageOrder.removeAll { $0 == key }; self.imageOrder.append(key)
+                    while self.imageOrder.count > 128 {
+                        let oldest = self.imageOrder.removeFirst()
+                        self.images.removeValue(forKey: oldest); self.requestedArtwork.remove(oldest)
+                    }
+                }
             }
         }
     }
@@ -345,11 +511,11 @@ final class AppModel: ObservableObject {
     }
 
     func discard() {
-        perform("discard", foreground: true) { _ in self.queue = []; self.edits = [:]; self.dirty = [] }
+        perform("discard", foreground: true, configure: { _ in }) { _ in self.queue = []; self.edits = [:]; self.dirty = [] }
     }
 
     func loadFacets() {
-        perform("facets") { self.genres = $0.genres ?? []; self.years = $0.years ?? []; self.playlists = $0.playlists ?? [] }
+        perform("facets", configure: { _ in }) { self.genres = $0.genres ?? []; self.years = $0.years ?? []; self.playlists = $0.playlists ?? [] }
     }
 
     func filter(more: Bool = false) {
@@ -365,7 +531,15 @@ final class AppModel: ObservableObject {
     }
 
     func addToPackage(_ ids: Set<String>, source: String) {
-        perform("package_add", configure: { $0.ids = Array(ids); $0.source = source }) { _ in self.loadPackage() }
+        guard !busy, !ids.isEmpty else { return }
+        let sorted = ids.sorted()
+        func next(_ offset: Int) {
+            let end = min(offset + 1000, sorted.count)
+            self.perform("package_add", foreground: true, configure: { $0.ids = Array(sorted[offset..<end]); $0.source = source }) { _ in
+                if end < sorted.count { next(end) } else { self.loadPackage() }
+            }
+        }
+        next(0)
     }
 
     func loadPackage(more: Bool = false) {
@@ -381,7 +555,7 @@ final class AppModel: ObservableObject {
     }
 
     func prepareRemoval() {
-        perform("prepare_delete", foreground: true) { self.review = $0.review }
+        perform("prepare_delete", foreground: true, configure: { _ in }) { self.review = $0.review }
     }
 
     func confirmRemoval(_ token: String) {
@@ -390,7 +564,7 @@ final class AppModel: ObservableObject {
     }
 
     func restore() {
-        perform("restore", foreground: true) { _ in self.refresh() }
+        perform("restore", foreground: true, configure: { _ in }) { _ in self.refresh() }
     }
 
     func eject() { perform("eject", foreground: true) }

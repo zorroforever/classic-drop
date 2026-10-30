@@ -2802,3 +2802,114 @@ def _string_mhod(mhod_type: int, value: str) -> bytes:
         body,
         fields=struct.pack("<III", mhod_type, 0, 0),
     )
+
+
+@pytest.mark.parametrize("serial", ("", "8P840FN62C7"))
+def test_mount_identified_ipod_classics_accepts_only_normal_classic_usb(
+    tmp_path: Path, serial: str
+) -> None:
+    platform = _MacOSVirtualStoragePlatform()
+    root = _ipod_volume(tmp_path / "classic", model_number="MB565")
+    platform.add_unmounted_volume(
+        root, identifiers=HardwareIdentifiers(0x05AC, 0x1261, product_serial=serial)
+    )
+    coordinator = DeviceCoordinator(Storage(platform))
+    report = coordinator.mount_identified_ipod_classics()
+    assert report.inventory_complete
+    assert not report.issues
+    assert len(platform.discover().observations) == 1
+    assert coordinator.active_ipod is None
+    assert coordinator.active_physical_device_id is None
+
+
+@pytest.mark.parametrize(
+    "identifiers",
+    (
+        HardwareIdentifiers(),
+        HardwareIdentifiers(0x1234, 0x1261),
+        HardwareIdentifiers(0x05AC, 0x1245),
+        HardwareIdentifiers(0x05AC, 0x1209),
+        HardwareIdentifiers(0x05AC, 0x1261, product_serial="8K70575PV9K"),
+    ),
+)
+def test_mount_identified_ipod_classics_rejects_unknown_conflicting_recovery_and_non_classic_evidence(
+    tmp_path: Path, identifiers: HardwareIdentifiers
+) -> None:
+    platform = _MacOSVirtualStoragePlatform()
+    root = _ipod_volume(tmp_path / "classic", model_number="MB565")
+    platform.add_unmounted_volume(root, identifiers=identifiers)
+    coordinator = DeviceCoordinator(Storage(platform))
+    coordinator.mount_identified_ipod_classics()
+    assert not platform.discover().observations
+
+
+def test_discover_devices_does_not_mount_unmounted_candidates(tmp_path: Path) -> None:
+    platform = _MacOSVirtualStoragePlatform()
+    root = _ipod_volume(tmp_path / "classic", model_number="MB565")
+    platform.add_unmounted_volume(root, identifiers=HardwareIdentifiers(0x05AC, 0x1261))
+    coordinator = DeviceCoordinator(Storage(platform))
+    assert not coordinator.discover_devices().candidates
+    assert platform.discover_unmounted().candidates
+
+
+def test_mount_failure_is_reported_without_hiding_existing_devices(
+    tmp_path: Path,
+) -> None:
+    from storage import StorageMountError
+
+    platform = _MacOSVirtualStoragePlatform()
+    root = _ipod_volume(tmp_path / "classic", model_number="MB565")
+    platform.add_volume(root)
+    other = tmp_path / "unmounted"
+    other.mkdir()
+    candidate = platform.add_unmounted_volume(
+        other,
+        device_id="other",
+        volume_id="other",
+        identifiers=HardwareIdentifiers(0x05AC, 0x1261),
+    )
+    platform.set_mount_error(other, StorageMountError("busy"))
+    coordinator = DeviceCoordinator(Storage(platform))
+    report = coordinator.mount_identified_ipod_classics()
+    assert report.inventory_complete
+    assert report.issues[0].physical_device_id == candidate.physical_device.id
+    assert "busy" in report.issues[0].detail
+    assert len(coordinator.discover_devices().candidates) == 1
+
+
+def test_mount_pass_reports_complete_external_device_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from storage import DiscoveryIssue, UnmountedVolumeDiscoveryResult
+
+    platform = _MacOSVirtualStoragePlatform()
+    root = tmp_path / "unmounted"
+    root.mkdir()
+    candidate = platform.add_unmounted_volume(
+        root, identifiers=HardwareIdentifiers(0x05AC, 0x1261)
+    )
+    coordinator = DeviceCoordinator(Storage(platform))
+    report = coordinator.mount_identified_ipod_classics(
+        frozenset({candidate.physical_device.id})
+    )
+    assert report.observed_devices == (candidate.physical_device,)
+    assert report.inventory_complete
+    assert not platform.discover().observations
+    monkeypatch.setattr(
+        platform,
+        "discover_unmounted",
+        lambda: UnmountedVolumeDiscoveryResult(
+            observed_devices=(candidate.physical_device,),
+            issues=(DiscoveryIssue("inventory", "incomplete"),),
+        ),
+    )
+    assert not coordinator.mount_identified_ipod_classics().inventory_complete
+
+
+def test_non_macos_coordinator_does_not_attempt_mount(tmp_path: Path) -> None:
+    platform = _LinuxVirtualStoragePlatform()
+    root = tmp_path / "unmounted"
+    root.mkdir()
+    platform.add_unmounted_volume(root, identifiers=HardwareIdentifiers(0x05AC, 0x1261))
+    DeviceCoordinator(Storage(platform)).mount_identified_ipod_classics()
+    assert not platform.discover().observations

@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from storage.errors import EjectError, MountInspectionError
+from storage.errors import EjectError, MountInspectionError, StorageMountError
 from storage.models import (
     DeviceBus,
     DiscoveryIssue,
@@ -20,6 +20,8 @@ from storage.models import (
     PhysicalDeviceId,
     ScsiVpdPagePlan,
     StorageCapabilities,
+    UnmountedVolumeCandidate,
+    UnmountedVolumeDiscoveryResult,
     Volume,
     VolumeId,
     VolumeObservation,
@@ -35,6 +37,8 @@ class _VirtualVolumeState:
     observation: VolumeObservation
     probe_result: HardwareProbeResult = field(default_factory=HardwareProbeResult)
     connected: bool = True
+    mounted: bool = True
+    mount_error: StorageMountError | None = None
     flush_count: int = 0
     eject_count: int = 0
     eject_error: EjectError | None = None
@@ -107,9 +111,69 @@ class VirtualStoragePlatform:
 
     def discover(self) -> ObservationDiscoveryResult:
         observations = tuple(
-            state.observation for state in self._volumes.values() if state.connected
+            state.observation
+            for state in self._volumes.values()
+            if state.connected and state.mounted
         )
         return ObservationDiscoveryResult(observations=observations)
+
+    def add_unmounted_volume(
+        self,
+        root: Path,
+        *,
+        device_id: str = "virtual-device-1",
+        volume_id: str = "virtual-volume-1",
+        label: str = "Virtual Volume",
+        identifiers: HardwareIdentifiers | None = None,
+    ) -> UnmountedVolumeCandidate:
+        observation = self.add_volume(
+            root,
+            device_id=device_id,
+            volume_id=volume_id,
+            label=label,
+            identifiers=identifiers,
+        )
+        self._state(root).mounted = False
+        return UnmountedVolumeCandidate(
+            observation.mount_instance, observation.physical_device
+        )
+
+    def discover_unmounted(self) -> UnmountedVolumeDiscoveryResult:
+        states = tuple(state for state in self._volumes.values() if state.connected)
+        return UnmountedVolumeDiscoveryResult(
+            candidates=tuple(
+                UnmountedVolumeCandidate(
+                    state.observation.mount_instance, state.observation.physical_device
+                )
+                for state in states
+                if not state.mounted
+            ),
+            observed_devices=tuple(
+                state.observation.physical_device for state in states
+            ),
+        )
+
+    def mount(self, candidate: UnmountedVolumeCandidate) -> VolumeObservation:
+        for state in self._volumes.values():
+            if (
+                state.connected
+                and not state.mounted
+                and state.observation.mount_instance == candidate.candidate_id
+                and state.observation.physical_device == candidate.physical_device
+            ):
+                if state.mount_error is not None:
+                    raise state.mount_error
+                self._connection_counter += 1
+                state.mounted = True
+                state.observation = replace(
+                    state.observation,
+                    mount_instance=f"virtual-{self._connection_counter}",
+                )
+                return state.observation
+        raise StorageMountError("The virtual unmounted candidate is no longer current")
+
+    def set_mount_error(self, root: Path, error: StorageMountError | None) -> None:
+        self._state(root).mount_error = error
 
     def inspect(self, mount_point: Path) -> VolumeObservation:
         canonical = mount_point.resolve(strict=False)
@@ -123,7 +187,7 @@ class VirtualStoragePlatform:
                 f"The virtual Volume is not connected at {mount_point}"
             )
         _, state = max(matching, key=lambda item: len(os.fspath(item[0])))
-        if not state.connected:
+        if not state.connected or not state.mounted:
             raise MountInspectionError(
                 f"The virtual Volume is not connected at {mount_point}"
             )
@@ -211,6 +275,7 @@ class VirtualStoragePlatform:
         state = self._state(root)
         self._connection_counter += 1
         state.connected = True
+        state.mounted = True
         state.observation = replace(
             state.observation,
             mount_instance=f"virtual-{self._connection_counter}",

@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from storage.errors import MountInspectionError, UnsupportedStorageOperationError
+from storage.errors import (
+    MountInspectionError,
+    StorageMountError,
+    UnsupportedStorageOperationError,
+)
 from storage.models import (
     DeviceBus,
     DiscoveryIssue,
@@ -24,6 +28,8 @@ from storage.models import (
     PhysicalDeviceId,
     ScsiVpdPagePlan,
     StorageCapabilities,
+    UnmountedVolumeCandidate,
+    UnmountedVolumeDiscoveryResult,
     Volume,
     VolumeId,
     VolumeObservation,
@@ -225,6 +231,16 @@ class _ScsiPassThroughDirect(ctypes.Structure):
 
 
 class WindowsPlatformAdapter:
+    def discover_unmounted(self) -> UnmountedVolumeDiscoveryResult:
+        return UnmountedVolumeDiscoveryResult(
+            issues=(
+                DiscoveryIssue("mount", "Automatic mounting is unavailable on Windows"),
+            )
+        )
+
+    def mount(self, candidate: UnmountedVolumeCandidate) -> VolumeObservation:
+        raise StorageMountError("Automatic mounting is unavailable on Windows")
+
     def __init__(self) -> None:
         win_dll: Any = vars(ctypes)["WinDLL"]
         self._kernel32: Any = win_dll("kernel32", use_last_error=True)

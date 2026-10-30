@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 from device_registry import (
     DEFAULT_DEVICE_REGISTRY,
     SYSINFO_AUTHORITY_FILENAME,
+    ConnectionMode,
     DeviceEvidence,
     DeviceIdentifier,
     DeviceRegistry,
@@ -60,6 +61,8 @@ from iOpenPod.app.models.device import (
     DeviceCandidateIssueCode,
     DeviceDiscovery,
     DeviceDiscoveryIssue,
+    DeviceMountIssue,
+    DeviceMountPass,
     DeviceReadiness,
 )
 from iOpenPod.app.models.photos import (
@@ -105,6 +108,8 @@ from storage import (
     HostPath,
     MountedVolume,
     MountInspectionError,
+    PhysicalDevice,
+    PhysicalDeviceId,
     RecoverableWriteError,
     ScsiVpdPagePlan,
     SessionClosedError,
@@ -413,6 +418,53 @@ class DeviceCoordinator:
             if self._active is None:
                 return None
             return self._active.record.mounted_volume.volume.id
+
+    @property
+    def active_physical_device_id(self) -> PhysicalDeviceId | None:
+        with self._lock:
+            if self._active is None:
+                return None
+            return self._active.record.mounted_volume.physical_device.id
+
+    def mount_identified_ipod_classics(
+        self,
+        excluded_device_ids: frozenset[PhysicalDeviceId] = frozenset(),
+    ) -> DeviceMountPass:
+        """Qualify current USB evidence before asking Storage to mount."""
+
+        with self._lock:
+            if self._storage.platform_name != "macos":
+                return DeviceMountPass((), False)
+            inventory = self._storage.discover_unmounted()
+            issues = [
+                DeviceMountIssue(None, issue.detail) for issue in inventory.issues
+            ]
+            for candidate in inventory.candidates:
+                device = candidate.physical_device
+                if device.id in excluded_device_ids:
+                    continue
+                evidence = _physical_hardware_evidence(device)
+                if not evidence.usb_identifiers:
+                    continue
+                result = self._registry.identify(evidence)
+                if (
+                    result.connection_mode is not ConnectionMode.NORMAL
+                    or result.status
+                    not in (IdentificationStatus.EXACT, IdentificationStatus.AMBIGUOUS)
+                    or not result.candidates
+                    or any(
+                        profile.family != "iPod Classic"
+                        for profile in result.candidates
+                    )
+                ):
+                    continue
+                try:
+                    self._storage.mount(candidate)
+                except (StorageError, OSError) as error:
+                    issues.append(DeviceMountIssue(device.id, str(error)))
+            return DeviceMountPass(
+                inventory.observed_devices, not inventory.issues, tuple(issues)
+            )
 
     def scrobble_context(self, expected: ActiveIPod) -> tuple[str, Callable[[], None]]:
         """Capture stable receipt identity and checks for read-only scrobbling."""
@@ -3794,8 +3846,12 @@ def _decode_full_resolution_photo(
 
 
 def _hardware_evidence(mounted: MountedVolume) -> DeviceEvidence:
-    identifiers = mounted.physical_device.identifiers
-    source = f"{mounted.physical_device.bus.value} hardware"
+    return _physical_hardware_evidence(mounted.physical_device)
+
+
+def _physical_hardware_evidence(device: PhysicalDevice) -> DeviceEvidence:
+    identifiers = device.identifiers
+    source = f"{device.bus.value} hardware"
     usb_identifiers: tuple[DeviceIdentifier[UsbIdentifier], ...] = ()
     if identifiers.usb_vendor_id is not None and identifiers.usb_product_id is not None:
         usb_identifiers = (
