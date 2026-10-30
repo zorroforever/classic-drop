@@ -35,6 +35,109 @@ def call(backend: NativeBackend, command: str, **kwargs: Any) -> Result:
     )
 
 
+def test_keep_completed_removal_preserves_files_and_current_package_after_preferences_change(
+    backend: NativeBackend,
+    connected: tuple[Device, ClassicDropEngine],  # noqa: F811
+    tmp_path: Path,
+) -> None:
+    from storage import FilePreconditionError
+
+    device, engine = connected
+    engine.commit(engine.preview((media_file(tmp_path),), Event()), Event())
+    removed = engine.active.library.tracks[0]
+    deletion = engine.remove_tracks((removed.track_id,), Event())
+    preferences = device.root / "iPod_Control/Device/Preferences"
+    preferences.write_bytes(bytes(2960))
+    engine.select(engine.discover()[0].id)
+    backend.state()
+    remaining = engine.active.library.tracks[0]
+    call(backend, "package_add", ids=(str(remaining.track_id),))
+    with pytest.raises(FilePreconditionError, match="Preferences"):
+        engine.restore_last(Event())
+    before = backend.state()
+    files = {
+        path.relative_to(device.root): path.read_bytes()
+        for path in device.root.rglob("*")
+        if path.is_file()
+    }
+
+    result = call(backend, "keep", token=deletion.recovery_path)
+
+    assert result.state.writes_allowed
+    assert not result.state.can_restore
+    assert result.state.generation == before.generation
+    assert result.state.package_count == 1
+    assert engine.history.latest_operation(engine._identity()) is None
+    assert files == {
+        path.relative_to(device.root): path.read_bytes()
+        for path in device.root.rglob("*")
+        if path.is_file()
+    }
+    assert removed.track_id not in {t.track_id for t in engine.active.library.tracks}
+    assert call(backend, "prepare_delete").review is not None
+    from classic_drop.history import ImportHistory
+
+    reopened = ImportHistory(engine.history.path.parent)
+    assert reopened.latest_operation(engine._identity()) is None
+    with reopened._connection() as db:
+        assert db.execute(
+            "SELECT operation, kept, restored FROM import_run ORDER BY id"
+        ).fetchall() == [("import", 1, 0), ("delete", 1, 0)]
+
+
+def test_keep_rejects_a_stale_recovery_record_without_unlocking_writes(
+    backend: NativeBackend,
+) -> None:
+    engine = backend.engine
+    deletion = engine.remove_tracks(
+        (engine.active.library.tracks[0].track_id,), Event()
+    )
+    backend.state()
+    with pytest.raises(ValueError, match="recovery record changed"):
+        call(backend, "keep", token="stale")
+    assert not backend.state().writes_allowed
+    assert engine.history.latest(engine._identity()) == deletion.recovery_path
+
+
+@pytest.mark.parametrize("invalid", ["pending", "state", "identity", "history"])
+def test_keep_refuses_uncertain_or_unrecordable_baselines(
+    backend: NativeBackend,
+    connected: tuple[Device, ClassicDropEngine],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    invalid: str,
+) -> None:
+    import sqlite3
+
+    from storage import StorageError
+
+    device, engine = connected
+    deletion = engine.remove_tracks(
+        (engine.active.library.tracks[0].track_id,), Event()
+    )
+    backend.state()
+    path = device.root / deletion.recovery_path
+    if invalid == "pending":
+        engine.pending_recovery = deletion.recovery_path
+    elif invalid in {"state", "identity"}:
+        journal = json.loads(path.read_bytes())
+        journal["state" if invalid == "state" else "volume_id"] = (
+            "restored" if invalid == "state" else "another-volume"
+        )
+        path.write_text(json.dumps(journal))
+    else:
+
+        def fail_history(*_args: object) -> None:
+            raise sqlite3.OperationalError("disk full")
+
+        monkeypatch.setattr(engine.history, "keep_current", fail_history)
+
+    with pytest.raises((ValueError, StorageError, sqlite3.OperationalError)):
+        call(backend, "keep", token=deletion.recovery_path)
+
+    assert not backend.state().writes_allowed
+    assert engine.history.latest(engine._identity()) == deletion.recovery_path
+
+
 def test_paged_tracks_keep_lossless_ids_and_reject_stale_generation(
     backend: NativeBackend,
 ) -> None:

@@ -52,7 +52,7 @@ Removal Review pages additionally require the retained Review token.
 `hello`, `discover`, `select`, `validate`, `eject`, `prepare_browser`, `tracks`, `albums`, `facets`,
 `artwork`, `preview`, `queue`, `edit`, `preview_artwork`, `cover`, `clear_cover`,
 `discard`, `commit`, `filter`, `package`, `package_add`, `package_remove`,
-`package_clear`, `prepare_delete`, `review`, `delete`, `restore`, `cancel` and
+`package_clear`, `prepare_delete`, `review`, `delete`, `restore`, `keep`, `cancel` and
 `close` form the native adapter's command surface. The engine and Storage retain
 all write preconditions. A UI enabled button is never write authority.
 
@@ -60,7 +60,11 @@ Adding prepares music on the Host. Explicit import submits the complete preview
 token set after acknowledged edits; it does not silently import a partial batch.
 Failed or canceled preparation preserves the prior queue. Confirmed/suspected
 duplicates need explicit override. Removal keeps original files for restoration
-and blocks another write until restored, as required by ADR-0177.
+and blocks another write until restored or explicitly kept as the current baseline
+(ADR-0177 and ADR-0181). Keeping a completed removal changes Host history only;
+the iPod's databases, recovery journals and retained files are unchanged. Earlier
+changes stop being offered for automatic restore across that baseline. Interrupted
+operations still require recovery, and Storage's restore checks remain strict.
 
 The helper has one serial engine worker and an independent control reader. Cancel
 requests reach a long operation without waiting for queued browse/cover work.
@@ -108,6 +112,19 @@ it does not delete files. Disconnect, device switch, canceled preparation and he
 loss invalidate the cache and selection. A reconnected device builds a fresh cache.
 Artwork demand belongs to visible views, with at most two physical requests and a
 128-image cache; hidden pending work is dropped.
+
+Clicking an Album card explicitly replaces the Track selection with all Music
+Tracks in that Album, including Tracks hidden by the current search. Double-click
+to open its Track list and select individual rows when only part of the Album
+should be removed. Choose **Add to removal package**, then open **To Remove** and
+check the accumulated package. **Remove from package** only edits this list.
+Choose **Review removal…** to inspect the complete Track list, affected Playlists
+and recovery size, then explicitly confirm **Remove recoverably** to change the
+iPod Library. Original media remains on the iPod for recovery, so this operation
+does not immediately free capacity. In **Recovery & History**, restore the removal
+or choose **Keep Current Result and Continue** before another import or removal.
+Keeping preserves the current removal package; another removal still requires
+Review and explicit confirmation. Retained recovery files continue to occupy space.
 
 On macOS, discovery can mount a filesystem volume positively qualified as an iPod
 through Storage. Failures are suppressed until physical reconnect or manual

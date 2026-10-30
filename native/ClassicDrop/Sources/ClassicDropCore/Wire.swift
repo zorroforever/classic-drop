@@ -119,6 +119,7 @@ public struct StateDTO: Decodable {
     public let trackCount, queueCount, packageCount: Int
     public let canRestore, writesAllowed: Bool
     public let recoveryPath: String
+    public let canKeepContents: Bool?
 }
 
 public struct ReviewDTO: Decodable, Identifiable {

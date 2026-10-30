@@ -154,10 +154,12 @@ class NativeBackend:
         )
         recovery = self.engine.pending_recovery or ""
         allowed = False
+        can_keep = False
         if active is not None:
             operation = self.engine.history.latest_operation(self.engine._identity())
             if operation:
                 recovery = recovery or operation[0]
+                can_keep = operation[1] == "delete" and not self.engine.pending_recovery
             try:
                 self.engine._require_writes_allowed()
                 allowed = True
@@ -176,6 +178,7 @@ class NativeBackend:
             bool(recovery),
             allowed,
             recovery,
+            can_keep,
         )
 
     def _result(
@@ -258,6 +261,10 @@ class NativeBackend:
             return self._result()
         if command == "restore":
             self.engine.restore_last(cancelled)
+            return self._result()
+        if command == "keep":
+            self.engine.keep_current_contents(request.token, cancelled)
+            self._invalidate_review()
             return self._result()
         if command == "discard":
             self.engine.discard()

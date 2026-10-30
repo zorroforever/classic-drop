@@ -53,8 +53,7 @@ struct LibraryView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 155, maximum: 230), spacing: 24)], alignment: .leading, spacing: 22) {
                     ForEach(model.albums) { album in
                         Button {
-                            model.selectedAlbum = album
-                            model.inspector = true
+                            model.selectAlbum(album)
                         } label: {
                             VStack(alignment: .leading, spacing: 7) {
                                 CoverView(id: album.artworkId)

@@ -182,6 +182,7 @@ class StateDTO:
     can_restore: bool
     writes_allowed: bool
     recovery_path: str
+    can_keep_contents: bool = False
 
 
 @dataclass(frozen=True, slots=True)

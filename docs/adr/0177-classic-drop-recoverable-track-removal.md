@@ -2,6 +2,7 @@
 
 - Status: Accepted, 2026-10-29
 - Supersedes: the append-only restriction in ADR-0175 for explicit Classic Drop Track removal only
+- Amended by: ADR-0181 permits explicitly accepting a completed removal before subsequent writes
 
 ## Context
 

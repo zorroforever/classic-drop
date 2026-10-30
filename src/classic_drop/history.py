@@ -22,6 +22,8 @@ class ImportHistory:
                 db.execute(
                     "ALTER TABLE import_run ADD COLUMN operation TEXT DEFAULT 'import'"
                 )
+            if "kept" not in columns:
+                db.execute("ALTER TABLE import_run ADD COLUMN kept INTEGER DEFAULT 0")
 
     def _connection(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -52,7 +54,7 @@ class ImportHistory:
     def latest(self, device: str) -> str | None:
         with self._connection() as db:
             row = db.execute(
-                "SELECT recovery FROM import_run WHERE device=? AND restored=0 ORDER BY id DESC LIMIT 1",
+                "SELECT recovery FROM import_run WHERE device=? AND restored=0 AND kept=0 ORDER BY id DESC LIMIT 1",
                 (device,),
             ).fetchone()
             return str(row[0]) if row else None
@@ -67,10 +69,26 @@ class ImportHistory:
     def latest_operation(self, device: str) -> tuple[str, str] | None:
         with self._connection() as db:
             row = db.execute(
-                "SELECT recovery, operation FROM import_run WHERE device=? AND restored=0 ORDER BY id DESC LIMIT 1",
+                "SELECT recovery, operation FROM import_run WHERE device=? AND restored=0 AND kept=0 ORDER BY id DESC LIMIT 1",
                 (device,),
             ).fetchone()
             return (str(row[0]), str(row[1])) if row else None
+
+    def keep_current(self, device: str, recovery: str) -> None:
+        """Accept a completed removal without allowing undo across its baseline."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT id, recovery, operation FROM import_run WHERE device=? AND restored=0 AND kept=0 ORDER BY id DESC LIMIT 1",
+                (device,),
+            ).fetchone()
+            if row is None or (row[1], row[2]) != (recovery, "delete"):
+                raise ValueError("The recovery record changed; reload")
+            db.execute(
+                "UPDATE import_run SET kept=1 WHERE device=? AND id<=? AND restored=0 AND kept=0",
+                (device, row[0]),
+            )
+            db.execute("DELETE FROM receipt WHERE device=?", (device,))
 
     def restored(self, device: str, recovery: str) -> None:
         with self._connection() as db:

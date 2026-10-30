@@ -40,7 +40,14 @@ from iOpenPod.app.services.device_coordinator import (
     SyncRecoveryRestoredError,
 )
 from iPodDB.library import ArtworkPixels, LibrarySnapshot
-from storage import DevicePath, HostPath, PhysicalDeviceId, Storage, capture_host_file
+from storage import (
+    DevicePath,
+    HostPath,
+    PhysicalDeviceId,
+    Storage,
+    TransactionState,
+    capture_host_file,
+)
 
 
 class OperationCancelledError(Exception):
@@ -785,6 +792,25 @@ class ClassicDropEngine:
             review.size_bytes,
             result.recovery_path,
         )
+
+    def keep_current_contents(self, recovery: str, cancelled: Event) -> None:
+        """Accept a completed removal in Host history, retaining device recovery data."""
+        self._checkpoint(cancelled)
+        if self.pending_recovery:
+            raise ValueError("An interrupted operation must be recovered first")
+        active, identity = self.active, self._identity()
+        if self.history.latest_operation(identity) != (recovery, "delete"):
+            raise ValueError("The recovery record changed; reload")
+        with self.coordinator.sync_session(active) as session:
+            if (
+                session.read_transaction_state(DevicePath(recovery))
+                is not TransactionState.COMMITTED
+            ):
+                raise ValueError("Only a completed removal can be kept")
+            self._checkpoint(cancelled)
+        # Complete the session's final identity/Library validation before accepting.
+        self.history.keep_current(identity, recovery)
+        self._removal_review = None
 
     def restore_last(self, cancelled: Event) -> ActiveIPod:
         self._checkpoint(cancelled)

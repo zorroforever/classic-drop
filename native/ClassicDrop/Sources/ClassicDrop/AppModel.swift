@@ -208,7 +208,9 @@ final class AppModel: ObservableObject {
         case "preview": return String(format: t("prepared.summary"), result.state.queueCount)
         case "commit": return String(format: t("import.summary"), result.count ?? 0)
         case "delete": return String(format: t("removal.summary"), result.count ?? 0)
+        case "package_add": return t("package") + " · \(result.state.packageCount)"
         case "restore": return t("restore.summary")
+        case "keep": return t("keep.summary")
         default: return t("finished")
         }
     }
@@ -366,6 +368,13 @@ final class AppModel: ObservableObject {
 
     func open(_ album: AlbumDTO) {
         selectedAlbum = album; openAlbum = album; loadDetail()
+    }
+
+    func selectAlbum(_ album: AlbumDTO) {
+        guard browserReady, !busy else { return }
+        selectedAlbum = album
+        selectedTracks = Set(allTracks.filter { $0.albumId == album.id }.map(\.id)).intersection(musicIDs)
+        inspector = true
     }
 
     func loadDetail(more: Bool = false) { applyLibraryFilter() }
@@ -554,7 +563,10 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var canReviewRemoval: Bool { writable && (state?.packageCount ?? 0) > 0 }
+
     func prepareRemoval() {
+        guard canReviewRemoval else { return }
         perform("prepare_delete", foreground: true, configure: { _ in }) { self.review = $0.review }
     }
 
@@ -565,6 +577,17 @@ final class AppModel: ObservableObject {
 
     func restore() {
         perform("restore", foreground: true, configure: { _ in }) { _ in self.refresh() }
+    }
+
+    func keepCurrentContents(_ expected: StateDTO) {
+        guard ready, !busy, state?.canKeepContents == true,
+              state?.generation == expected.generation,
+              state?.recoveryPath == expected.recoveryPath,
+              !expected.recoveryPath.isEmpty else { return }
+        let path = expected.recoveryPath
+        perform("keep", foreground: true, configure: { $0.token = path }) { _ in
+            self.review = nil
+        }
     }
 
     func eject() { perform("eject", foreground: true) }

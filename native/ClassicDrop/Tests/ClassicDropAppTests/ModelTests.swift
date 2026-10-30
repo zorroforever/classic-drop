@@ -14,17 +14,59 @@ final class StubConnection: HelperConnection {
         _ command: String,
         extra: String = "",
         revision: String = "r",
-        generation: String = "g"
+        generation: String = "g",
+        packageCount: Int = 0,
+        writesAllowed: Bool = true,
+        canKeepContents: Bool = false,
+        recoveryPath: String = ""
     ) throws {
         let request = try XCTUnwrap(requests.last { $0.command == command })
         let json = """
-        {"version":1,"id":"\(request.id)","event":"result","generation":"\(generation)","sequence":1,"code":"","detail":"","result":{"state":{"generation":"\(generation)","revision":"\(revision)","active_id":"device","active_name":"Synthetic iPod","available_bytes":100,"total_bytes":200,"track_count":2,"queue_count":1,"package_count":0,"can_restore":false,"writes_allowed":true,"recovery_path":""}\(extra)}}
+        {"version":1,"id":"\(request.id)","event":"result","generation":"\(generation)","sequence":1,"code":"","detail":"","result":{"state":{"generation":"\(generation)","revision":"\(revision)","active_id":"device","active_name":"Synthetic iPod","available_bytes":100,"total_bytes":200,"track_count":2,"queue_count":1,"package_count":\(packageCount),"can_restore":false,"writes_allowed":\(writesAllowed),"can_keep_contents":\(canKeepContents),"recovery_path":"\(recoveryPath)"}\(extra)}}
         """
         onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(json.utf8)))
     }
 }
 
 final class ModelTests: XCTestCase {
+    @MainActor
+    func testKeepingCurrentContentsBindsRecoveryAndPreservesPackageForReview() throws {
+        let (model, connection) = try connected()
+        model.discover()
+        try connection.reply("discover", packageCount: 4, writesAllowed: false,
+                             canKeepContents: true, recoveryPath: ".iopenpod-recovery/current/transaction.json")
+        XCTAssertFalse(model.canReviewRemoval)
+
+        model.keepCurrentContents(try XCTUnwrap(model.state))
+
+        XCTAssertEqual(connection.requests.last?.command, "keep")
+        XCTAssertEqual(connection.requests.last?.token, ".iopenpod-recovery/current/transaction.json")
+        let count = connection.requests.count
+        try connection.reply("keep", packageCount: 4)
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertEqual(model.state?.packageCount, 4)
+        XCTAssertTrue(model.canReviewRemoval)
+        XCTAssertNil(model.review)
+    }
+
+    @MainActor
+    func testKeepConfirmationCannotApplyToAChangedDeviceGeneration() throws {
+        let (model, connection) = try connected()
+        model.discover()
+        try connection.reply("discover", writesAllowed: false, canKeepContents: true,
+                             recoveryPath: ".iopenpod-recovery/current/transaction.json")
+        let confirmed = try XCTUnwrap(model.state)
+        model.discover()
+        try connection.reply("discover", generation: "other", writesAllowed: false,
+                             canKeepContents: true, recoveryPath: ".iopenpod-recovery/current/transaction.json")
+        let count = connection.requests.count
+
+        model.keepCurrentContents(confirmed)
+
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertFalse(model.state?.writesAllowed ?? true)
+    }
+
     @MainActor
     func connected(prepare: Bool = true) throws -> (AppModel, StubConnection) {
         let connection = StubConnection()
@@ -195,6 +237,48 @@ final class ModelTests: XCTestCase {
         XCTAssertFalse(model.browserPreparing)
         XCTAssertFalse(model.busy)
         XCTAssertFalse(model.error.isEmpty)
+    }
+
+    @MainActor
+    func testSelectedAlbumAddsAllItsMusicDespiteSearchAndOtherTrackSelection() throws {
+        let (model, connection) = try connected(prepare: false)
+        try connection.reply("prepare_browser")
+        try connection.reply("albums", extra: #", "albums":[{"id":"b","title":"Album","artist":"Artist","year":2020,"track_count":3,"duration_ms":3000,"artwork_id":"0"}],"total":1"#)
+        try connection.reply("tracks", extra: #", "tracks":[{"id":"1","title":"First","artist":"A","album":"Album","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"music"},{"id":"2","title":"Second","artist":"A","album":"Album","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"music"},{"id":"3","title":"Episode","artist":"A","album":"Album","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"podcast"},{"id":"4","title":"Other","artist":"A","album":"Album","album_artist":"A","album_id":"other","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"music"}],"total":4"#)
+        let album = try XCTUnwrap(model.albums.first)
+        model.selectedTracks = ["4"]
+        model.query = "First"
+        model.loadTracks()
+        model.selectAlbum(album)
+
+        XCTAssertEqual(model.tracks.map(\.id), ["1"])
+        XCTAssertEqual(model.selectedTracks, ["1", "2"])
+        model.addLibrarySelection()
+
+        XCTAssertEqual(model.selectedMusicCount, 2)
+        XCTAssertEqual(connection.requests.last?.command, "package_add")
+        XCTAssertEqual(connection.requests.last?.ids, ["1", "2"])
+    }
+
+    @MainActor
+    func testRemovalReviewRequiresNonemptyPackageAndWriteEligibility() throws {
+        let (model, connection) = try connected()
+        let before = connection.requests.count
+
+        model.prepareRemoval()
+        XCTAssertEqual(connection.requests.count, before)
+
+        model.loadPackage()
+        try connection.reply("package", packageCount: 2, writesAllowed: false)
+        let readOnlyCount = connection.requests.count
+        model.prepareRemoval()
+        XCTAssertEqual(connection.requests.count, readOnlyCount)
+
+        model.loadPackage()
+        try connection.reply("package", packageCount: 2)
+        model.prepareRemoval()
+        XCTAssertEqual(connection.requests.last?.command, "prepare_delete")
+        XCTAssertFalse(connection.requests.contains { $0.command == "delete" })
     }
 
 }
