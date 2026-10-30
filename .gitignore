@@ -35,6 +35,11 @@ MANIFEST
 !/packaging/iOpenPod.spec
 !/packaging/update-helper.spec
 !/packaging/classic-drop.spec
+!/packaging/classic-drop-helper.spec
+
+# Native Swift build output
+.build/
+.swiftpm/
 
 # Installer logs
 pip-log.txt

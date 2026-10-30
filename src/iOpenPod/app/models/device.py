@@ -7,7 +7,7 @@ from device_registry import DeviceProfile, IdentificationStatus
 from iOpenPod.app.core.settings.device import DeviceSettings
 from iOpenPod.app.models.ipod_preferences import IPodPreferenceSection
 from iPodDB.library import LibrarySnapshot
-from storage import FileFingerprint
+from storage import FileFingerprint, PhysicalDevice, PhysicalDeviceId
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +102,19 @@ class DeviceCandidate:
 class DeviceDiscoveryIssue:
     source: str
     detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceMountIssue:
+    physical_device_id: PhysicalDeviceId | None
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceMountPass:
+    observed_devices: tuple[PhysicalDevice, ...]
+    inventory_complete: bool
+    issues: tuple[DeviceMountIssue, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -257,6 +257,19 @@ class DiscoveryResult:
     issues: tuple[DiscoveryIssue, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class UnmountedVolumeCandidate:
+    candidate_id: str
+    physical_device: PhysicalDevice
+
+
+@dataclass(frozen=True, slots=True)
+class UnmountedVolumeDiscoveryResult:
+    candidates: tuple[UnmountedVolumeCandidate, ...] = ()
+    observed_devices: tuple[PhysicalDevice, ...] = ()
+    issues: tuple[DiscoveryIssue, ...] = ()
+
+
 class AccessMode(StrEnum):
     READ_ONLY = "read_only"
     READ_WRITE = "read_write"

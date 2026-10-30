@@ -33,6 +33,8 @@ from storage.models import (
     HardwareProbeResult,
     MountedVolume,
     ScsiVpdPagePlan,
+    UnmountedVolumeCandidate,
+    UnmountedVolumeDiscoveryResult,
     VolumeObservation,
 )
 from storage.platform.native import native_platform_adapter
@@ -160,6 +162,18 @@ class Storage:
             self._sessions = remaining_references
 
         return DiscoveryResult(volumes=mounted, issues=tuple(issues))
+
+    def discover_unmounted(self) -> UnmountedVolumeDiscoveryResult:
+        """Return generic unmounted candidates without opening a Session."""
+
+        return self._platform.discover_unmounted()
+
+    def mount(self, candidate: UnmountedVolumeCandidate) -> MountedVolume:
+        """Mount an adapter-issued candidate after native identity validation."""
+
+        observation = self._platform.mount(candidate)
+        with self._state_lock:
+            return self._mounted_volume(observation)
 
     def inspect(self, mount_point: Path) -> MountedVolume:
         """Inspect a user-selected Mount Point without assigning domain meaning."""

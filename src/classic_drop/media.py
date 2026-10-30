@@ -18,6 +18,7 @@ from iOpenPod.app.display_text import source_text
 from iOpenPod.app.export_tagging import ExportMediaTagger
 from iOpenPod.app.media.importing import ImportedSong, MusicImporter
 from iOpenPod.app.media.inspection import MediaInspectionError
+from iOpenPod.app.media.progress import MediaPreparationProgress
 from iOpenPod.app.media.tags import apply_tag_values, read_tag_values
 from iOpenPod.app.media.transcoding import MediaTranscoder, TranscodeSettings
 from iPodDB.library import ArtworkPixels, MediaType
@@ -51,21 +52,31 @@ class PreparedSong:
     warnings: tuple[str, ...] = ()
 
 
-def collect_audio(paths: tuple[Path, ...]) -> tuple[Path, ...]:
+def collect_audio(
+    paths: tuple[Path, ...],
+    *,
+    checkpoint: Callable[[], None] = lambda: None,
+    discovered: Callable[[int], None] = lambda _: None,
+) -> tuple[Path, ...]:
     found: dict[Path, None] = {}
 
     def add(path: Path) -> None:
+        checkpoint()
         if (
             not path.is_symlink()
             and not path.name.startswith(".")
             and path.suffix.lower() in AUDIO_EXTENSIONS
         ):
-            found[path.absolute()] = None
+            absolute = path.absolute()
+            if absolute not in found:
+                found[absolute] = None
+                discovered(len(found))
 
     def failed(error: OSError) -> None:
         raise error
 
     for path in paths:
+        checkpoint()
         path = path.expanduser().absolute()
         if path.is_symlink():
             continue
@@ -73,6 +84,7 @@ def collect_audio(paths: tuple[Path, ...]) -> tuple[Path, ...]:
             for directory, directories, files in os.walk(
                 path, followlinks=False, onerror=failed
             ):
+                checkpoint()
                 directories[:] = sorted(
                     d
                     for d in directories
@@ -141,6 +153,8 @@ def prepare_song(
     profile: DeviceProfile,
     resources: ExitStack,
     checkpoint: Callable[[], None],
+    *,
+    progress: Callable[[MediaPreparationProgress], None] | None = None,
 ) -> PreparedSong:
     source = HostPath(path)
     importer = MusicImporter()
@@ -172,6 +186,7 @@ def prepare_song(
             TranscodeSettings(normalize_44100=True),
             checkpoint=checkpoint,
             expected_source=original,
+            progress=progress,
         )
     )
     song = importer.inspect(prepared.source, profile, checkpoint=checkpoint)

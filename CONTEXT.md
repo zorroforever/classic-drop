@@ -505,6 +505,13 @@ ADR-0177. Its removal package is bound to one Active iPod, Library Snapshot, and
 database fingerprint; the single Storage Transaction retains removed media and
 prior database files on that iPod for restoration. This exception does not change
 other Library save cleanup policies.
+Classic Drop also has an opt-in SwiftUI/AppKit native build with a bundled
+headless Python helper, album grid/detail pages, import editing, removal Review,
+recovery and persistent phase-scoped progress. The Qt entry remains a migration
+reference. ADR-0178 replaces the native build's frontend/worker choices while
+preserving the existing engine and Storage write contracts. See
+[native build and validation](docs/classic-drop-native.md) for platform and
+physical-device acceptance limits.
 Preparation requests capture source and workspace revisions together. Read-only
 developer inspection exposes changes, requirements, observed stages, output
 fingerprints, and diagnostics without exposing private document bindings or granting

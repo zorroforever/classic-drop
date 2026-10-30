@@ -83,6 +83,10 @@ class StorageOperationError(StorageError):
     """An operating-system filesystem operation failed safely."""
 
 
+class StorageMountError(StorageOperationError):
+    """The Host could not mount an exact, revalidated Volume candidate."""
+
+
 class UnsupportedStorageOperationError(StorageError):
     """The current Host adapter cannot safely perform an operation."""
 

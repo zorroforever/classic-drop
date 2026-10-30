@@ -55,7 +55,8 @@ Classic Drop 目前面向：
 - 开发工作流使用 `uv`；
 - 导入需要转换的音频格式时，`PATH` 中须有 `ffmpeg` 和 `ffprobe`。
 
-当 Finder 能显示 iPod 时，Classic Drop 即可检查设备。不要同时运行其他正在写入 iPod 数据库的应用。Finder 的自动设备处理可能弹出或锁定卷；请一次只使用一个管理工具，并在断开连接前安全弹出设备。
+原生应用会在连接后自动挂载受支持的 iPod Classic 卷，无需先在 Finder 中打开设备。
+不要同时运行其他正在写入 iPod 数据库的应用；请一次只使用一个管理工具，并在断开连接前安全弹出设备。
 
 ## 安装开发版本
 
@@ -63,12 +64,22 @@ Classic Drop 目前面向：
 git clone https://github.com/zorroforever/classic-drop.git
 cd classic-drop
 uv sync --locked
-uv run classic-drop
 ```
 
 当前主要通过源代码分发，尚未发布经过签名和公证的正式安装包。
 
 ## 构建 macOS 应用
+
+液态玻璃新 UI 使用 SwiftUI，开发构建内置无界面的 Python helper。
+请使用以下命令构建并启动原生应用：
+
+```shell
+uv run python scripts/build_classic_drop_native.py
+open "dist/native/Classic Drop.app"
+```
+
+构建选项、协议和待完成的硬件验证见[原生应用文档](docs/classic-drop-native.md)。
+`uv run classic-drop` 以及下面的打包命令仍启动保留用于对照的 Qt 界面：
 
 ```shell
 uv sync --locked
@@ -80,7 +91,7 @@ open "dist/Classic Drop.app"
 
 ## 常用流程
 
-1. 连接 iPod，等待 macOS 完成挂载。
+1. 连接 iPod；原生应用会自动发现并挂载受支持的卷。
 2. 打开 Classic Drop；如果没有列出设备，点击 **Refresh（刷新）**。
 3. 选择 iPod。**iPod Library（iPod 曲库）** 工作区以只读方式展示曲库，可在列表或专辑视图中搜索；通过侧栏切换工作区。
 4. 打开 **To Import（待导入）**，添加文件或文件夹，检查识别出的元数据和封面。

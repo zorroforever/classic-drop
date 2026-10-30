@@ -17,6 +17,7 @@ from storage import (
     ReadOnlyFilesystemError,
     SessionInvalidatedError,
     Storage,
+    StorageMountError,
     VolumeDisconnectedError,
     VolumeIdentityChangedError,
 )
@@ -55,6 +56,48 @@ def _portal(
     platform.add_volume(root, writable=writable)
     storage = Storage(platform, writer_lock_directory=tmp_path / "locks")
     return root, platform, storage
+
+
+def test_mount_creates_a_new_connection_generation(tmp_path: Path) -> None:
+    root, platform, storage = _portal(tmp_path)
+    previous = storage.discover().volumes[0]
+    with storage.open_session(previous) as old_session:
+        platform.disconnect(root)
+        storage.discover()
+        assert not old_session.is_active
+        platform.add_unmounted_volume(root)
+        inventory = storage.discover_unmounted()
+        assert inventory.observed_devices[0].id == previous.physical_device.id
+        assert storage.discover().volumes == ()
+        mounted = storage.mount(inventory.candidates[0])
+        assert mounted.connection_generation != previous.connection_generation
+        assert (
+            storage.discover().volumes[0].connection_generation
+            == mounted.connection_generation
+        )
+        with storage.open_session(mounted) as session:
+            assert session.is_active
+
+
+def test_mount_rejects_a_candidate_after_virtual_disconnect(tmp_path: Path) -> None:
+    root, platform, storage = _portal(tmp_path)
+    platform.add_unmounted_volume(root)
+    candidate = storage.discover_unmounted().candidates[0]
+    platform.disconnect(root)
+    with pytest.raises(StorageMountError):
+        storage.mount(candidate)
+    assert not storage.discover().volumes
+
+
+def test_failed_mount_does_not_create_a_generation_or_session(tmp_path: Path) -> None:
+    root, platform, storage = _portal(tmp_path)
+    platform.add_unmounted_volume(root)
+    candidate = storage.discover_unmounted().candidates[0]
+    platform.set_mount_error(root, StorageMountError("busy"))
+    with pytest.raises(StorageMountError, match="busy"):
+        storage.mount(candidate)
+    assert not storage._generations
+    assert not storage._sessions
 
 
 def test_discovery_distinguishes_identity_mount_and_connection_generation(

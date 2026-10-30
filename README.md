@@ -55,7 +55,10 @@ An import is append-only. Removing existing music is a separate, explicit workfl
 - `uv` for the development workflow;
 - `ffmpeg` and `ffprobe` on `PATH` when importing formats that need conversion.
 
-When Finder shows the iPod, Classic Drop can inspect it. Avoid running another application that is writing the iPod database at the same time. Finder's automatic device handling may eject or lock the volume; use one manager at a time and safely eject before disconnecting.
+The native app automatically mounts supported iPod Classic volumes after connection;
+Finder is not required for that workflow. Avoid running another application that is
+writing the iPod database at the same time. Use one manager at a time and safely
+eject before disconnecting.
 
 ## Install a development build
 
@@ -63,12 +66,24 @@ When Finder shows the iPod, Classic Drop can inspect it. Avoid running another a
 git clone https://github.com/zorroforever/classic-drop.git
 cd classic-drop
 uv sync --locked
-uv run classic-drop
 ```
 
 The current repository is primarily a source distribution. A signed/notarized release installer is not published yet.
 
 ## Build the macOS application
+
+The approved SwiftUI shell has a separate development build with a bundled
+headless helper. It provides the album grid/detail UI and persistent preparation
+and write progress:
+
+```shell
+uv run python scripts/build_classic_drop_native.py
+open "dist/native/Classic Drop.app"
+```
+
+See [native build and verification](docs/classic-drop-native.md) for build options,
+protocol details and pending platform/hardware acceptance. The source command
+`classic-drop` and the following build retain the Qt reference frontend:
 
 ```shell
 uv sync --locked
@@ -80,7 +95,7 @@ The generated application is an Apple Silicon build when built on the current de
 
 ## Typical workflow
 
-1. Connect the iPod and wait for macOS to mount it.
+1. Connect the iPod; the native app discovers and mounts supported volumes automatically.
 2. Open Classic Drop and choose **Refresh** if the device is not listed.
 3. Select the iPod. The **iPod Library** workspace is read-only and can be searched in list or album mode; use the sidebar to switch workspaces.
 4. Open **To Import**, add files or a folder, and review the detected metadata and artwork.
