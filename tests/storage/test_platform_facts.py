@@ -24,16 +24,6 @@ from storage.platform.linux import (
 )
 from storage.platform.macos import MacOSPlatformAdapter
 
-_MACOS_IOREG_MEDIA = b"""\
-+-o AppleUSBKeyboard@14100000  <class IOUSBHostDevice, ...>
-  |   \"USB Serial Number\" = \"KBD-ABCDEF\"
-+-o iPod@01130000  <class IOUSBHostDevice, ...>
-  |   \"USB Serial Number\" = \"000A270018A1F847\"
-  +-o IOUSBMassStorageDriver  <class IOUSBMassStorageDriver, ...>
-    +-o Apple iPod Media  <class IOMedia, ...>
-    |   \"BSD Name\" = \"disk4\"
-"""
-
 
 class _RecordingIOKit:
     def __init__(self) -> None:
@@ -48,14 +38,26 @@ class _RecordingFrameworks:
         self.iokit = _RecordingIOKit()
 
 
+@pytest.mark.parametrize(
+    ("whole_disk", "vendor", "product", "serial"),
+    [
+        ("disk4", 0x05AC, 0x1261, "000A270018A1F847"),
+        ("disk7", 0x1234, 0x5678, "OTHER-DISK"),
+        ("disk8", None, None, ""),
+    ],
+)
 def test_macos_inspection_correlates_bsd_disk_with_usb_hardware(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    whole_disk: str,
+    vendor: int | None,
+    product: int | None,
+    serial: str,
 ) -> None:
     disk_info: dict[str, object] = {
         "MountPoint": str(tmp_path),
-        "DeviceIdentifier": "disk4s2",
-        "ParentWholeDisk": "disk4",
+        "DeviceIdentifier": f"{whole_disk}s2",
+        "ParentWholeDisk": whole_disk,
         "VolumeUUID": "12345678-1234-5678-9ABC-DEF012345678",
         "FilesystemType": "msdos",
         "VolumeName": "John's iPod",
@@ -66,14 +68,44 @@ def test_macos_inspection_correlates_bsd_disk_with_usb_hardware(
     }
     usb_devices: list[dict[str, object]] = [
         {
+            "IOObjectClass": "IOUSBHostDevice",
             "idVendor": 0x05AC,
             "idProduct": 0x1261,
             "USB Serial Number": "000A270018A1F847",
+            "IORegistryEntryChildren": [
+                {
+                    "IOObjectClass": "IOBlockStorageDriver",
+                    "IORegistryEntryChildren": [
+                        {
+                            "IOObjectClass": "IOMedia",
+                            "BSD Name": "disk4",
+                            "Whole": True,
+                            "IORegistryEntryChildren": [
+                                {"BSD Name": "disk4s2", "Whole": False}
+                            ],
+                        }
+                    ],
+                }
+            ],
         },
         {
+            "IOObjectClass": "IOUSBHostDevice",
             "idVendor": 0x05AC,
             "idProduct": 0x0220,
             "USB Serial Number": "KBD-ABCDEF",
+        },
+        {
+            "IOObjectClass": "IOUSBHostDevice",
+            "idVendor": 0x1234,
+            "idProduct": 0x5678,
+            "USB Serial Number": "OTHER-DISK",
+            "IORegistryEntryChildren": [
+                {"IOObjectClass": "IOMedia", "BSD Name": "disk7", "Whole": True},
+                {
+                    "IOObjectClass": "IOUSBHostDevice",
+                    "IORegistryEntryChildren": [{"BSD Name": "disk8", "Whole": True}],
+                },
+            ],
         },
     ]
 
@@ -88,14 +120,7 @@ def test_macos_inspection_correlates_bsd_disk_with_usb_hardware(
                 stdout=plistlib.dumps(disk_info),
                 stderr=b"",
             )
-        if command == ["ioreg", "-r", "-c", "IOMedia"]:
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                stdout=_MACOS_IOREG_MEDIA,
-                stderr=b"",
-            )
-        if command == ["ioreg", "-a", "-r", "-c", "IOUSBHostDevice"]:
+        if command == ["ioreg", "-a", "-l", "-r", "-c", "IOUSBHostDevice"]:
             return subprocess.CompletedProcess(
                 command,
                 0,
@@ -115,9 +140,9 @@ def test_macos_inspection_correlates_bsd_disk_with_usb_hardware(
     observation = adapter.inspect(tmp_path)
 
     identifiers = observation.physical_device.identifiers
-    assert identifiers.usb_vendor_id == 0x05AC
-    assert identifiers.usb_product_id == 0x1261
-    assert identifiers.transport_serial == "000A270018A1F847"
+    assert identifiers.usb_vendor_id == vendor
+    assert identifiers.usb_product_id == product
+    assert identifiers.transport_serial == serial
     assert adapter.physical_device_id_for_path(tmp_path) == (
         observation.physical_device.id
     )

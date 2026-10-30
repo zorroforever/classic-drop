@@ -818,21 +818,13 @@ def _diskutil_info(target: Path) -> dict[str, object]:
 
 
 def _ioreg_hardware_index() -> dict[str, HardwareIdentifiers]:
-    """Correlate mounted BSD disks with generic USB hardware observations."""
+    """Correlate whole disks with their owning USB device in one snapshot."""
 
-    media_output = _run_ioreg(["ioreg", "-r", "-c", "IOMedia"])
-    devices_output = _run_ioreg(["ioreg", "-a", "-r", "-c", "IOUSBHostDevice"])
-    if not media_output or not devices_output:
-        return {}
-    bsd_to_serial = _parse_ioreg_media_serials(
-        media_output.decode("utf-8", errors="replace")
+    # -l includes properties on descendants, including each IOMedia's BSD Name.
+    # An IOMedia-rooted query omits the USB ancestors needed for correlation.
+    return _parse_ioreg_usb_hardware(
+        _run_ioreg(["ioreg", "-a", "-l", "-r", "-c", "IOUSBHostDevice"])
     )
-    serial_to_identifiers = _parse_ioreg_usb_devices(devices_output)
-    return {
-        bsd_name: identifiers
-        for bsd_name, serial in bsd_to_serial.items()
-        if (identifiers := serial_to_identifiers.get(serial)) is not None
-    }
 
 
 def _run_ioreg(command: list[str]) -> bytes:
@@ -856,34 +848,7 @@ def _run_ioreg(command: list[str]) -> bytes:
     return completed.stdout
 
 
-def _parse_ioreg_media_serials(text: str) -> dict[str, str]:
-    """Map each BSD whole disk to its owning USB transport serial."""
-
-    result: dict[str, str] = {}
-    current_serial = ""
-    pending_serial = ""
-    for line in text.splitlines():
-        if "<class IOUSBHostDevice" in line:
-            current_serial = ""
-            pending_serial = ""
-        serial_match = re.search(
-            r'"USB Serial Number"\s*=\s*"([^"]+)"',
-            line,
-        )
-        if serial_match is not None:
-            current_serial = _normalized_transport_serial(serial_match.group(1))
-            continue
-        if "<class IOMedia" in line:
-            pending_serial = current_serial
-            continue
-        bsd_match = re.search(r'"BSD Name"\s*=\s*"(disk\d+)"', line)
-        if bsd_match is not None and pending_serial:
-            result[bsd_match.group(1)] = pending_serial
-            pending_serial = ""
-    return result
-
-
-def _parse_ioreg_usb_devices(payload: bytes) -> dict[str, HardwareIdentifiers]:
+def _parse_ioreg_usb_hardware(payload: bytes) -> dict[str, HardwareIdentifiers]:
     try:
         parsed: object = plistlib.loads(payload)
     except (plistlib.InvalidFileException, TypeError, ValueError):
@@ -891,33 +856,44 @@ def _parse_ioreg_usb_devices(payload: bytes) -> dict[str, HardwareIdentifiers]:
 
     result: dict[str, HardwareIdentifiers] = {}
 
-    def collect(node: object) -> None:
+    def collect(node: object, owner: HardwareIdentifiers | None = None) -> None:
         if isinstance(node, list):
             for item in cast("list[object]", node):
-                collect(item)
+                collect(item, owner)
             return
         if not isinstance(node, dict):
             return
         properties = cast("dict[object, object]", node)
-        serial_value = properties.get("USB Serial Number") or properties.get(
-            "kUSBSerialNumberString"
-        )
-        serial = (
-            _normalized_transport_serial(serial_value)
-            if isinstance(serial_value, str)
-            else ""
-        )
-        vendor_id = _object_identifier(properties.get("idVendor"))
-        product_id = _object_identifier(properties.get("idProduct"))
-        if serial and vendor_id is not None and product_id is not None:
-            result[serial] = HardwareIdentifiers(
-                usb_vendor_id=vendor_id,
-                usb_product_id=product_id,
-                transport_serial=serial,
+        if properties.get("IOObjectClass") == "IOUSBHostDevice":
+            # An incomplete child USB device must not inherit its hub's identity.
+            owner = None
+            serial_value = properties.get("USB Serial Number") or properties.get(
+                "kUSBSerialNumberString"
             )
+            serial = (
+                _normalized_transport_serial(serial_value)
+                if isinstance(serial_value, str)
+                else ""
+            )
+            vendor_id = _object_identifier(properties.get("idVendor"))
+            product_id = _object_identifier(properties.get("idProduct"))
+            if serial and vendor_id is not None and product_id is not None:
+                owner = HardwareIdentifiers(
+                    usb_vendor_id=vendor_id,
+                    usb_product_id=product_id,
+                    transport_serial=serial,
+                )
+        bsd_name = properties.get("BSD Name")
+        if (
+            owner is not None
+            and properties.get("Whole") is True
+            and isinstance(bsd_name, str)
+            and re.fullmatch(r"disk\d+", bsd_name) is not None
+        ):
+            result[bsd_name] = owner
         children = properties.get("IORegistryEntryChildren")
         if isinstance(children, list):
-            collect(cast("list[object]", children))
+            collect(cast("list[object]", children), owner)
 
     collect(parsed)
     return result
