@@ -200,14 +200,29 @@ struct PlaylistAddTracks: View {
     @State private var selection = Set<String>()
     @State private var search = ""
     @State private var allowRepeat = false
+    private var visibleTracks: [TrackDTO] {
+        model.playlistAvailableTracks.filter { search.isEmpty || $0.searchable.localizedCaseInsensitiveContains(search) }
+    }
+    private var visibleSelection: Binding<Set<String>> {
+        let visibleIDs = Set(visibleTracks.map(\.id))
+        return Binding(get: { selection.intersection(visibleIDs) }, set: { selected in
+            selection.subtract(visibleIDs)
+            selection.formUnion(selected.intersection(visibleIDs))
+        })
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(strings.text("playlist.add")).font(.title2.bold())
             TextField(strings.text("search"), text: $search).textFieldStyle(.roundedBorder)
-            Table(model.playlistAvailableTracks.filter { search.isEmpty || $0.searchable.localizedCaseInsensitiveContains(search) }, selection: $selection) {
+            Table(visibleTracks, selection: visibleSelection) {
                 TableColumn(strings.text("title"), value: \.title)
                 TableColumn(strings.text("artist"), value: \.artist)
                 TableColumn(strings.text("album"), value: \.album)
+            }
+            HStack {
+                Text(String(format: strings.text("selection.count"), selection.count)).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(strings.text("selection.clear")) { selection = [] }.disabled(selection.isEmpty)
             }
             PlaylistInlineError()
             Toggle(strings.text("playlist.repeat"), isOn: $allowRepeat)

@@ -20,6 +20,10 @@ Removing a Playlist Entry or deleting a Playlist preserves Library music.
 Deleting a folder includes its descendants; Smart rule dependencies must be
 resolved first. Undo/redo and Discard affect the draft only.
 
+**Add Tracks** retains selections across searches. Select individual songs or all
+current results, search again, and add the accumulated selection once. The count
+includes hidden selections; **Clear Selection** clears the entire selection.
+
 Table headers apply temporary sorting. **Save Current Sort as Playlist Order**
 records the complete ordinary Playlist order and Manual sort in one undoable edit.
 Manual dragging and movement require the complete list, no search filter, and no
