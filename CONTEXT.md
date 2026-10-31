@@ -14,6 +14,15 @@ then beyond it.
 
 ## Current stage
 
+Classic Drop Playlist work extends the native helper with source-bound,
+undoable ordinary Playlist, Smart Playlist, and Folder drafts. Explicit Review
+prepares an isolated sidecar-aware candidate without writing device files; Save
+publishes only that issued candidate through Storage. Playlist deletion preserves
+Tracks and media, and reviewed music imports can share the same transaction and
+explicit ordinary Playlist destinations. See ADR-0186 and the
+[native workflow](docs/classic-drop-native.md) for implementation and acceptance
+limits.
+
 Affected Playlist writes create a missing flat dataset-2 counterpart for a retained
 special Podcasts Playlist in dataset 3. Existing counterparts keep their own
 metadata, and ordinary counterpart consistency checks remain required. See ADR-0174.

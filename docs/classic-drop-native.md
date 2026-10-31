@@ -11,6 +11,43 @@ system GroupBox. The album grid and dense Library/removal Tables remain content
 views. The retained Qt entry remains available for comparison. Do not run both
 against one iPod.
 
+## Playlists
+
+Playlist management follows [ADR-0186](adr/0186-manage-classic-drop-playlist-drafts.md).
+The native sidebar provides ordinary Playlists, Smart Playlists and folders.
+Edits stay in a helper-owned draft until **Review Changes** and **Save to iPod**.
+Removing a Playlist Entry or deleting a Playlist preserves Library music.
+Deleting a folder includes its descendants; Smart rule dependencies must be
+resolved first. Undo/redo and Discard affect the draft only.
+
+Table headers apply temporary sorting. **Save Current Sort as Playlist Order**
+records the complete ordinary Playlist order and Manual sort in one undoable edit.
+Manual dragging and movement require the complete list, no search filter, and no
+temporary sort. Smart Playlists expose their saved presentation sort separately
+from the rule limit's selection order.
+
+Smart previews leave the draft unchanged. Applying supported rules saves their
+matching members to the draft; unsupported imported rules remain read-only and
+retained. Automatic updating refreshes supported membership in the final reviewed
+candidate, rather than running a background service. Rule references read the same
+input draft's saved membership.
+
+Smart preview progress and cancellation remain available inside the rule editor.
+Invalid rule input returns a correlated validation error and leaves the draft
+unchanged so the user can correct it and retry.
+
+Imports can target the Library alone, existing ordinary Playlists, or one new
+ordinary Playlist in a selected folder. Review can combine selected imports with
+Playlist edits. Saving Playlists alone leaves queued music unimported and requires
+fresh source preparation afterward while preserving Host editing intentions and
+the batch's original-ALAC choice. Temporary destinations continue only through
+verified saved ID mappings. Saving or restoring never falls back to a same-name
+Playlist. Recovery restores the complete save, including its combined import.
+
+Check reads and projects current playback sidecars without writing the iPod.
+Changes after Review require another Check. Disconnect or helper loss invalidates
+draft/Review authority; an interrupted save is never replayed automatically.
+
 ## Build
 
 Requirements: macOS, Apple's Swift toolchain with the macOS 26 SDK, UV and the
