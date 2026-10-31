@@ -377,3 +377,5 @@
 "playlist.finish.empty" = "書き込まずに完了";
 "playlist.sort.save.current" = "現在の並び順をプレイリスト順序として保存";
 "playlist.sort.clear" = "保存された順序を表示";
+"playlist.preview.running" = "スマートプレイリストのプレビューを計算中…";
+"playlist.preview.cancel" = "プレビューをキャンセル";

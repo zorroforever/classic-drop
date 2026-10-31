@@ -34,16 +34,27 @@ struct PlaylistEditor: View {
             }
             Spacer(minLength: 0)
             PlaylistInlineError()
+            if model.smartPreviewRunning {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(t(model.cancelRequested ? "cancelling" : "playlist.preview.running")).font(.callout).foregroundStyle(.secondary)
+                }
+            }
             GlassControls {
                 HStack {
-                    Button(t("cancel")) { model.smartPreviewEpoch += 1; dismiss() }.keyboardShortcut(.cancelAction)
+                    if model.smartPreviewRunning {
+                        Button(t(model.cancelRequested ? "cancelling" : "playlist.preview.cancel")) { model.cancelSmartPreview() }
+                            .keyboardShortcut(.cancelAction).disabled(model.cancelRequested)
+                    } else {
+                        Button(t("cancel")) { model.smartPreviewEpoch += 1; dismiss() }.keyboardShortcut(.cancelAction).disabled(model.busy)
+                    }
                     Spacer()
                     if context.kind == "smart", supportsRules, !context.moveOnly {
-                        Button(t("playlist.preview")) { model.previewSmart(smart, playlistId: context.playlist?.id) }
+                        Button(t("playlist.preview")) { model.previewSmart(smart, playlistId: context.playlist?.id) }.disabled(!model.playlistEditable)
                     }
                     Button(t(context.kind == "smart" && supportsRules && !context.moveOnly ? "playlist.rules.apply" : "playlist.apply")) { apply() }
-                        .keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }.disabled(!model.playlistEditable)
+                        .keyboardShortcut(.defaultAction).disabled(!model.playlistEditable || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }.padding(24).frame(width: 720, height: context.kind == "smart" && !context.moveOnly ? 720 : 310)
         .onAppear {

@@ -346,3 +346,5 @@
 "playlist.finish.empty" = "Finish without Writing";
 "playlist.sort.save.current" = "Save Current Sort as Playlist Order";
 "playlist.sort.clear" = "Show Saved Order";
+"playlist.preview.running" = "Calculating Smart Playlist preview…";
+"playlist.preview.cancel" = "Cancel Preview";

@@ -14,6 +14,13 @@ enum PlaylistLifecycle { case select(String), eject, close, removal }
 extension AppModel {
     var activePlaylist: PlaylistSummaryDTO? { playlistItems.first { $0.id == selectedPlaylist } }
     var playlistEditable: Bool { writable && playlistDraft?.locked != true }
+    var smartPreviewRunning: Bool { busy && task?.command == "playlist_preview" }
+    func cancelSmartPreview() {
+        guard smartPreviewRunning, !cancelRequested else { return }
+        smartPreviewEpoch += 1
+        smartPreview = []; smartPreviewTotal = 0; smartPreviewCalculated = false
+        cancel()
+    }
     var canReorderEntries: Bool {
         playlistEditable && playlistEntriesComplete && playlistQuery.isEmpty && playlistSortOrder.isEmpty &&
         activePlaylist?.canEditEntries == true && [0, 1].contains(activePlaylist?.sortOrder ?? -1)

@@ -377,3 +377,5 @@
 "playlist.finish.empty" = "完成（不写入）";
 "playlist.sort.save.current" = "将当前排序保存为列表顺序";
 "playlist.sort.clear" = "显示保存顺序";
+"playlist.preview.running" = "正在计算智能播放列表预览…";
+"playlist.preview.cancel" = "取消预览";

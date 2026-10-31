@@ -264,4 +264,33 @@ final class PlaylistModelTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
     }
 
+    @MainActor func testSmartPreviewCanCancelInSheetAndIgnoresLateResults() throws {
+        let (model, connection) = try connected()
+        model.previewSmart(SmartPlaylistDTO(), playlistId: nil)
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "playlist_preview" })
+        XCTAssertTrue(model.smartPreviewRunning)
+        model.cancelSmartPreview()
+        XCTAssertEqual(connection.requests.last?.command, "cancel")
+        XCTAssertEqual(connection.requests.last?.token, request.id)
+        XCTAssertTrue(model.cancelRequested)
+        try connection.reply("playlist_preview", extra: draft + #", "tracks":[],"total":10"#)
+        XCTAssertFalse(model.busy)
+        XCTAssertFalse(model.smartPreviewCalculated)
+        XCTAssertTrue(model.smartPreview.isEmpty)
+        XCTAssertTrue(model.playlistEditable)
+    }
+    @MainActor func testCorrelatedSmartValidationErrorUnlocksEditor() throws {
+        let (model, connection) = try connected()
+        model.previewSmart(SmartPlaylistDTO(), playlistId: nil)
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "playlist_preview" })
+        let json = """
+        {"version":1,"id":"\(request.id)","event":"error","generation":"g","sequence":1,"code":"invalid_request","detail":"Rating must be nonnegative"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(json.utf8)))
+        XCTAssertFalse(model.busy)
+        XCTAssertFalse(model.smartPreviewRunning)
+        XCTAssertTrue(model.playlistEditable)
+        XCTAssertEqual(model.error, "Rating must be nonnegative")
+    }
+
 }
