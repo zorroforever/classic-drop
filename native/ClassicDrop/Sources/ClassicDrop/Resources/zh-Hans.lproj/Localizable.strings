@@ -162,6 +162,7 @@
 "playlist.delete.draft" = "从草稿删除";
 "playlist.add" = "加入歌曲…";
 "playlist.pick" = "选择";
+"playlist.pick_all" = "全选当前结果";
 "playlist.pending.count" = "待添加（%d 首）";
 "playlist.pending.hint" = "按选入顺序添加，可逐首移除误选的歌曲。";
 "playlist.pending.empty" = "尚未选择歌曲";

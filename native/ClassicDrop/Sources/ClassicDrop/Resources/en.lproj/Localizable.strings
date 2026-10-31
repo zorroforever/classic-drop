@@ -162,6 +162,7 @@
 "playlist.delete.draft" = "Delete from Draft";
 "playlist.add" = "Add Tracks…";
 "playlist.pick" = "Select";
+"playlist.pick_all" = "Select All Results";
 "playlist.pending.count" = "To add (%d)";
 "playlist.pending.hint" = "Added in selection order. Remove any song before adding.";
 "playlist.pending.empty" = "No songs selected";

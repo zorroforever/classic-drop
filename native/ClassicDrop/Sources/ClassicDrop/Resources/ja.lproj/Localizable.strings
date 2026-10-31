@@ -162,6 +162,7 @@
 "playlist.delete.draft" = "下書きから削除";
 "playlist.add" = "曲を追加…";
 "playlist.pick" = "選択";
+"playlist.pick_all" = "検索結果をすべて選択";
 "playlist.pending.count" = "追加予定（%d 曲）";
 "playlist.pending.hint" = "選択した順に追加します。追加前に曲を個別に取り消せます。";
 "playlist.pending.empty" = "曲が選択されていません";

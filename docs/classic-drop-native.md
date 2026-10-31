@@ -28,6 +28,11 @@ individual songs even when the search hides them. Result checkboxes also cancel
 individual selections. Adding submits that insertion order; a group selected at
 once follows the displayed result order. Removing and selecting a song again
 places it at the end of the pending list.
+Clicking another result adds it without replacing earlier picks. Table row focus
+does not change the pending selection. **Select All Results** explicitly adds the
+current matches once; only a pick toggle, pending remove button, or
+**Clear Selection** removes picks. Final submission reads the same ordered pending
+selection displayed in the sheet.
 
 Table headers apply temporary sorting. **Save Current Sort as Playlist Order**
 records the complete ordinary Playlist order and Manual sort in one undoable edit.

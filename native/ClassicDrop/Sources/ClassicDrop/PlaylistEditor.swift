@@ -203,42 +203,45 @@ struct PlaylistAddTracks: View {
     private var visibleTracks: [TrackDTO] {
         model.playlistAvailableTracks.filter { search.isEmpty || $0.searchable.localizedCaseInsensitiveContains(search) }
     }
-    private var visibleSelection: Binding<Set<String>> {
-        let visible = visibleTracks.map(\.id)
-        let visibleIDs = Set(visible)
-        return Binding(get: { Set(selection).intersection(visibleIDs) }, set: { selected in
-            selection.removeAll { visibleIDs.contains($0) && !selected.contains($0) }
-            let existing = Set(selection)
-            selection.append(contentsOf: visible.filter { selected.contains($0) && !existing.contains($0) })
-        })
-    }
     private var pendingTracks: [TrackDTO] {
         let tracks = Dictionary(uniqueKeysWithValues: model.playlistAvailableTracks.map { ($0.id, $0) })
         return selection.compactMap { tracks[$0] }
     }
-    private func selected(_ id: String) -> Binding<Bool> {
-        Binding(get: { selection.contains(id) }, set: { selected in
-            if selected {
-                if !selection.contains(id) { selection.append(id) }
-            } else {
-                selection.removeAll { $0 == id }
-            }
-        })
+    private func include(_ ids: [String]) {
+        var existing = Set(selection)
+        selection.append(contentsOf: ids.filter { existing.insert($0).inserted })
+    }
+    private func trackCell(_ text: String, track: TrackDTO) -> some View {
+        Button { include([track.id]) } label: {
+            Text(text).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(.borderless).foregroundStyle(.primary)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(strings.text("playlist.add")).font(.title2.bold())
-            TextField(strings.text("search"), text: $search).textFieldStyle(.roundedBorder)
+            HStack {
+                TextField(strings.text("search"), text: $search).textFieldStyle(.roundedBorder)
+                Button(strings.text("playlist.pick_all")) { include(visibleTracks.map(\.id)) }
+                    .buttonStyle(.borderless).accessibilityIdentifier("playlist.pick-all")
+                    .disabled(model.busy || visibleTracks.isEmpty)
+            }
             HStack(alignment: .top, spacing: 16) {
-                Table(visibleTracks, selection: visibleSelection) {
+                Table(visibleTracks) {
                     TableColumn(strings.text("playlist.pick")) { track in
-                        Toggle(track.title, isOn: selected(track.id)).labelsHidden().toggleStyle(.checkbox)
-                            .accessibilityLabel(strings.text("playlist.pick") + " " + track.title)
+                        Button {
+                            if selection.contains(track.id) { selection.removeAll { $0 == track.id } }
+                            else { include([track.id]) }
+                        } label: {
+                            Image(systemName: selection.contains(track.id) ? "checkmark.square.fill" : "square")
+                                .foregroundColor(selection.contains(track.id) ? .accentColor : .secondary)
+                        }.buttonStyle(.borderless)
+                            .accessibilityLabel(strings.text(selection.contains(track.id) ? "playlist.pending.remove" : "playlist.pick") + " " + track.title)
+                            .accessibilityAddTraits(selection.contains(track.id) ? .isSelected : [])
                             .accessibilityIdentifier("playlist.pick.\(track.id)")
                     }.width(42)
-                    TableColumn(strings.text("title"), value: \.title)
-                    TableColumn(strings.text("artist"), value: \.artist)
-                    TableColumn(strings.text("album"), value: \.album)
+                    TableColumn(strings.text("title")) { track in trackCell(track.title, track: track) }
+                    TableColumn(strings.text("artist")) { track in trackCell(track.artist, track: track) }
+                    TableColumn(strings.text("album")) { track in trackCell(track.album, track: track) }
                 }
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
@@ -275,7 +278,7 @@ struct PlaylistAddTracks: View {
             HStack {
                 Text(String(format: strings.text("selection.count"), selection.count)).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button(strings.text("selection.clear")) { selection = [] }.disabled(selection.isEmpty)
+                Button(strings.text("selection.clear")) { selection = [] }.disabled(selection.isEmpty || model.busy)
             }
             PlaylistInlineError()
             Toggle(strings.text("playlist.repeat"), isOn: $allowRepeat)
