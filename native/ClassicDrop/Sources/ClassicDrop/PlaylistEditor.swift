@@ -197,28 +197,81 @@ struct PlaylistAddTracks: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
     @Environment(\.dismiss) private var dismiss
-    @State private var selection = Set<String>()
+    @State private var selection: [String] = []
     @State private var search = ""
     @State private var allowRepeat = false
     private var visibleTracks: [TrackDTO] {
         model.playlistAvailableTracks.filter { search.isEmpty || $0.searchable.localizedCaseInsensitiveContains(search) }
     }
     private var visibleSelection: Binding<Set<String>> {
-        let visibleIDs = Set(visibleTracks.map(\.id))
-        return Binding(get: { selection.intersection(visibleIDs) }, set: { selected in
-            selection.subtract(visibleIDs)
-            selection.formUnion(selected.intersection(visibleIDs))
+        let visible = visibleTracks.map(\.id)
+        let visibleIDs = Set(visible)
+        return Binding(get: { Set(selection).intersection(visibleIDs) }, set: { selected in
+            selection.removeAll { visibleIDs.contains($0) && !selected.contains($0) }
+            let existing = Set(selection)
+            selection.append(contentsOf: visible.filter { selected.contains($0) && !existing.contains($0) })
+        })
+    }
+    private var pendingTracks: [TrackDTO] {
+        let tracks = Dictionary(uniqueKeysWithValues: model.playlistAvailableTracks.map { ($0.id, $0) })
+        return selection.compactMap { tracks[$0] }
+    }
+    private func selected(_ id: String) -> Binding<Bool> {
+        Binding(get: { selection.contains(id) }, set: { selected in
+            if selected {
+                if !selection.contains(id) { selection.append(id) }
+            } else {
+                selection.removeAll { $0 == id }
+            }
         })
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(strings.text("playlist.add")).font(.title2.bold())
             TextField(strings.text("search"), text: $search).textFieldStyle(.roundedBorder)
-            Table(visibleTracks, selection: visibleSelection) {
-                TableColumn(strings.text("title"), value: \.title)
-                TableColumn(strings.text("artist"), value: \.artist)
-                TableColumn(strings.text("album"), value: \.album)
-            }
+            HStack(alignment: .top, spacing: 16) {
+                Table(visibleTracks, selection: visibleSelection) {
+                    TableColumn(strings.text("playlist.pick")) { track in
+                        Toggle(track.title, isOn: selected(track.id)).labelsHidden().toggleStyle(.checkbox)
+                            .accessibilityLabel(strings.text("playlist.pick") + " " + track.title)
+                            .accessibilityIdentifier("playlist.pick.\(track.id)")
+                    }.width(42)
+                    TableColumn(strings.text("title"), value: \.title)
+                    TableColumn(strings.text("artist"), value: \.artist)
+                    TableColumn(strings.text("album"), value: \.album)
+                }
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(strings.text("playlist.pending.hint")).font(.caption).foregroundStyle(.secondary)
+                        if selection.isEmpty {
+                            Text(strings.text("playlist.pending.empty")).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    ForEach(Array(pendingTracks.enumerated()), id: \.element.id) { index, track in
+                                        HStack(spacing: 8) {
+                                            Text("\(index + 1)").monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 22)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(track.title).lineLimit(1)
+                                                Text(track.artist + " · " + track.album).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                            Button { selection.removeAll { $0 == track.id } } label: { Image(systemName: "xmark.circle.fill") }
+                                                .buttonStyle(.borderless)
+                                                .help(strings.text("playlist.pending.remove"))
+                                                .accessibilityLabel(strings.text("playlist.pending.remove") + " " + track.title)
+                                                .accessibilityIdentifier("playlist.pending.remove.\(track.id)")
+                                        }.padding(.vertical, 6)
+                                        Divider()
+                                    }
+                                }
+                            }
+                        }
+                    }.frame(maxHeight: .infinity)
+                } label: {
+                    Text(String(format: strings.text("playlist.pending.count"), selection.count))
+                }.frame(width: 280)
+            }.disabled(model.busy)
             HStack {
                 Text(String(format: strings.text("selection.count"), selection.count)).font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -231,11 +284,11 @@ struct PlaylistAddTracks: View {
                 Spacer()
                 Button(strings.text("playlist.add")) {
                     var edit = PlaylistEditDTO(action: "append", playlistId: model.selectedPlaylist)
-                    edit.trackIds = model.playlistAvailableTracks.filter { selection.contains($0.id) }.map(\.id); edit.allowRepeat = allowRepeat
+                    edit.trackIds = selection; edit.allowRepeat = allowRepeat
                     model.mutatePlaylist(edit) { dismiss() }
                 }.disabled(selection.isEmpty || !model.playlistEditable).keyboardShortcut(.defaultAction)
             }
-        }.padding(24).frame(width: 660, height: 530).interactiveDismissDisabled(model.busy)
+        }.padding(24).frame(width: 940, height: 600).interactiveDismissDisabled(model.busy)
     }
 }
 

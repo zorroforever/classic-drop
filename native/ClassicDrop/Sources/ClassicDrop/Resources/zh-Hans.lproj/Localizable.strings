@@ -161,6 +161,11 @@
 "playlist.delete.hint" = "以下播放列表和文件夹将从草稿移除。iPod 上的音乐文件保留。必须先解决智能规则引用。";
 "playlist.delete.draft" = "从草稿删除";
 "playlist.add" = "加入歌曲…";
+"playlist.pick" = "选择";
+"playlist.pending.count" = "待添加（%d 首）";
+"playlist.pending.hint" = "按选入顺序添加，可逐首移除误选的歌曲。";
+"playlist.pending.empty" = "尚未选择歌曲";
+"playlist.pending.remove" = "从待添加清单移除";
 "playlist.remove" = "从播放列表移除";
 "playlist.up" = "上移";
 "playlist.down" = "下移";
