@@ -306,7 +306,11 @@ class PlaylistSession:
                     edit.name or f"{target.name} copy",
                     edit.parent_id,
                     track_ids=target.track_ids,
-                    sort_order=edit.sort_order or PlaylistSortOrder.MANUAL,
+                    sort_order=(
+                        PlaylistSortOrder.MANUAL
+                        if edit.sort_order is None
+                        else edit.sort_order
+                    ),
                 )
                 created = True
             else:

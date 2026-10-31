@@ -298,3 +298,12 @@ def test_reorder_requires_complete_exact_entries_and_manual_sort() -> None:
     apply(session, "update", playlist_id=10, sort_order=PlaylistSortOrder.TITLE)
     with pytest.raises(ValueError):
         apply(session, "reorder_entries", playlist_id=10, entry_ids=("c", "a", "b"))
+
+
+def test_regular_copy_respects_explicit_default_sort_order() -> None:
+    session = drafts.PlaylistSession(library())
+    result = apply(
+        session, "copy_regular", playlist_id=10, sort_order=PlaylistSortOrder.DEFAULT
+    )
+    assert result.playlist is not None
+    assert result.playlist.sort_order is PlaylistSortOrder.DEFAULT
