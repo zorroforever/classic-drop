@@ -27,6 +27,34 @@ It is designed for people who want to keep the music already on an iPod, add a f
 - **macOS workspaces:** sidebar navigation, a native toolbar, a collapsible artwork inspector, and system palette support in English, Simplified Chinese, and Japanese.
 - **Read-only device discovery:** connecting, discovering, and browsing do not modify the iPod.
 
+## Screenshots
+
+Actual screenshots of the native SwiftUI app, with English UI below. The [Chinese](README.zh-CN.md#界面截图) and [Japanese](README.ja.md#スクリーンショット) READMEs show the same workspaces in their respective languages. Device names and personal paths are covered with coarse mosaic. Import preparation uses generated demo audio; no import, removal, or restore was executed for these screenshots.
+
+### Album library and artwork inspector
+
+Browse album covers and inspect album metadata alongside the library.
+
+![English album grid with sidebar navigation and artwork inspector](docs/classic-drop/screenshots/library-en.webp)
+
+### Album details and track list
+
+Open an album to view its artwork, year, duration, and individual tracks.
+
+![English album detail page with artwork and track list](docs/classic-drop/screenshots/album-en.webp)
+
+### Import preparation and metadata editing
+
+Review selected files, artwork, editable tags, and the original-ALAC option before explicitly importing.
+
+![English import queue with demo tracks, metadata editor, and ALAC controls](docs/classic-drop/screenshots/import-en.webp)
+
+### Removal package and filters
+
+Filter existing music and stage a Removal Package for review before confirming any device changes.
+
+![English removal workspace with music filters and a staged Removal Package](docs/classic-drop/screenshots/removal-en.webp)
+
 ## Scope and non-goals
 
 Classic Drop currently targets:
@@ -45,7 +73,7 @@ The following are intentionally out of scope:
 - replacing Finder/iTunes device management;
 - cloud music services or online metadata lookup.
 
-An import is append-only. Removing existing music is a separate, explicit workflow in **To Remove**: review the selected tracks and affected playlists before confirming. Removal also removes those tracks from playlists, while retaining original database and media files on the iPod for recovery. Recovery data continues to occupy device capacity, so removal does not immediately free that space. A removal must be restored before another import or removal; consecutive imports remain allowed and individually recoverable. Restoration requires the original iPod and the local operation history. See [ADR-0177](docs/adr/0177-classic-drop-recoverable-track-removal.md).
+An import is append-only. Removing existing music is a separate, explicit workflow in **To Remove**: review the selected tracks and affected playlists before confirming. Removal also removes those tracks from playlists, while retaining original database and media files on the iPod for recovery. Recovery data continues to occupy device capacity, so removal does not immediately free that space. After a completed removal, restore it or explicitly keep the current library before another import or removal. Keeping it retires that removal and earlier operations as automatic restore choices, while retaining recovery files. Consecutive imports remain allowed and individually recoverable. Restoration requires the original iPod and the local operation history. See [ADR-0177](docs/adr/0177-classic-drop-recoverable-track-removal.md) and [ADR-0181](docs/adr/0181-classic-drop-accepted-removal-baseline.md).
 
 ## Requirements
 
