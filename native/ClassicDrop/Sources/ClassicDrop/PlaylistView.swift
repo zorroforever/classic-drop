@@ -21,7 +21,9 @@ struct PlaylistTree: View {
             HStack {
                 Label(item.name, systemImage: item.symbol).lineLimit(1)
                 Spacer(minLength: 0)
-                if item.dirty { Image(systemName: "circle.fill").font(.system(size: 5)).accessibilityLabel(strings.text("playlist.unsaved")) }
+                if model.playlistOrderDrafts[item.id] != nil {
+                    Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(.orange).accessibilityLabel(strings.text("playlist.order.pending"))
+                } else if item.dirty { Image(systemName: "circle.fill").font(.system(size: 5)).accessibilityLabel(strings.text("playlist.unsaved")) }
             }.contentShape(Rectangle())
                 .foregroundStyle(model.selectedPlaylist == item.id && model.workspace == .playlist ? Color.accentColor : Color.primary)
         }.buttonStyle(.plain).help(item.fullPath)
@@ -54,8 +56,8 @@ struct PlaylistView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
     private func t(_ key: String) -> String { strings.text(key) }
-    private var visible: [PlaylistEntryDTO] {
-        model.sortedPlaylistEntries.filter { entry in
+    private func visible(_ entries: [PlaylistEntryDTO]) -> [PlaylistEntryDTO] {
+        entries.filter { entry in
             model.playlistQuery.isEmpty || [entry.track?.title ?? "", entry.track?.artist ?? "", entry.track?.album ?? ""].joined(separator: " ").localizedCaseInsensitiveContains(model.playlistQuery)
         }
     }
@@ -134,7 +136,11 @@ struct PlaylistView: View {
         }
     }
     private func entries(_ item: PlaylistSummaryDTO) -> some View {
-        VStack(spacing: 0) {
+        let displayed = model.sortedPlaylistEntries
+        let positions = Dictionary(uniqueKeysWithValues: displayed.enumerated().map { ($0.element.id, $0.offset) })
+        let original = Dictionary(uniqueKeysWithValues: model.playlistEntries.enumerated().map { ($0.element.id, $0.offset) })
+        let changed = Set(displayed.filter { positions[$0.id] != original[$0.id] }.map(\.id))
+        return VStack(spacing: 0) {
             HStack {
                 TextField(t("search"), text: $model.playlistQuery).textFieldStyle(.roundedBorder)
                 if item.editable && item.kind != "folder" {
@@ -153,12 +159,16 @@ struct PlaylistView: View {
                     Button(t("playlist.sort.clear")) { model.playlistSortOrder = [] }
                 }
             }.padding(12)
-            Table(visible, selection: $model.selectedEntries, sortOrder: $model.playlistSortOrder) {
-                TableColumn("#", value: \.index) { entry in Text("\(entry.index + 1)").monospacedDigit() }.width(45)
+            Table(visible(displayed), selection: $model.selectedEntries, sortOrder: $model.playlistSortOrder) {
+                TableColumn("#", value: \.index) { entry in
+                    Text("\((positions[entry.id] ?? entry.index) + 1)").monospacedDigit()
+                        .foregroundStyle(changed.contains(entry.id) ? Color.orange : Color.primary)
+                }.width(45)
                 TableColumn(t("title"), value: \.sortTitle) { entry in
                     HStack {
                         if let track = entry.track { CoverView(model: model, id: track.artworkId, radius: 3).frame(width: 26, height: 26) }
                         Text(entry.track?.title ?? t("playlist.missing"))
+                            .foregroundStyle(changed.contains(entry.id) ? Color.orange : Color.primary)
                     }
                     .onDrag { NSItemProvider(object: ("entries:" + entry.id) as NSString) }
                     .onDrop(of: [UTType.text], isTargeted: nil) { providers in
@@ -183,6 +193,13 @@ struct PlaylistView: View {
                     Button { model.changeEntries("move_entries_up") } label: { Image(systemName: "arrow.up") }.help(t("playlist.up")).disabled(!model.canReorderEntries || model.selectedEntries.isEmpty)
                     Button { model.changeEntries("move_entries_down") } label: { Image(systemName: "arrow.down") }.help(t("playlist.down")).disabled(!model.canReorderEntries || model.selectedEntries.isEmpty)
                     Spacer()
+                    if model.hasLocalPlaylistOrder {
+                        Label(t("playlist.order.pending"), systemImage: "circle.fill").font(.caption).foregroundStyle(.orange)
+                    }
+                    if model.hasLocalPlaylistOrder || !model.playlistSortOrder.isEmpty {
+                        Button(t("playlist.order.restore")) { model.restorePlaylistOrder() }
+                    }
+                    Button(t("playlist.order.save")) { model.saveDisplayedPlaylistOrder() }.disabled(!model.canSaveDisplayedPlaylistOrder)
                     if !model.playlistEntriesComplete { ProgressView().controlSize(.small) }
                 }.padding(12).disabled(!model.playlistEditable)
             }
@@ -236,18 +253,18 @@ struct PlaylistDraftBar: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
     var body: some View {
-        if let draft = model.playlistDraft, draft.dirty {
+        if model.hasUnsavedPlaylistChanges {
             Divider()
             HStack {
-                Label(strings.text("playlist.unsaved"), systemImage: "circle.fill").font(.caption)
+                Label(strings.text(model.playlistOrderDrafts.isEmpty ? "playlist.unsaved" : "playlist.order.save.first"), systemImage: "circle.fill").font(.caption)
                 Spacer()
-                Button(strings.text("playlist.undo")) { model.playlistHistory("playlist_undo") }.disabled(!draft.canUndo)
-                Button(strings.text("playlist.redo")) { model.playlistHistory("playlist_redo") }.disabled(!draft.canRedo)
+                Button(strings.text("playlist.undo")) { model.playlistHistory("playlist_undo") }.disabled(model.playlistDraft?.canUndo != true)
+                Button(strings.text("playlist.redo")) { model.playlistHistory("playlist_redo") }.disabled(model.playlistDraft?.canRedo != true)
                 Button(strings.text("playlist.discard")) { model.playlistHistory("playlist_discard") }
                 Menu(strings.text("playlist.check")) {
                     Button(strings.text("playlist.check.only")) { model.preparePlaylistReview() }
                     if !model.queue.isEmpty { Button(strings.text("playlist.check.combined")) { model.preparePlaylistReview(includeImports: true) } }
-                }.menuStyle(.borderlessButton).fixedSize()
+                }.menuStyle(.borderlessButton).fixedSize().disabled(!model.playlistOrderDrafts.isEmpty)
             }.padding(12).disabled(!model.playlistEditable)
         }
     }

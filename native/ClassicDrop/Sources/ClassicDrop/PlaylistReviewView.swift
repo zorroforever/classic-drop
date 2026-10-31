@@ -74,13 +74,13 @@ struct PlaylistLifecycleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(strings.text("playlist.unsaved")).font(.title2.bold())
-            Text(strings.text("playlist.lifecycle.hint"))
+            Text(strings.text(model.playlistOrderDrafts.isEmpty ? "playlist.lifecycle.hint" : "playlist.order.lifecycle"))
             PlaylistInlineError()
             HStack {
                 Button(strings.text("cancel")) { model.cancelLifecycle() }.keyboardShortcut(.cancelAction)
                 Button(strings.text("playlist.discard")) { model.discardForLifecycle() }
                 Spacer()
-                Button(strings.text("playlist.check.save")) { model.preparePlaylistReview() }.keyboardShortcut(.defaultAction)
+                Button(strings.text("playlist.check.save")) { model.preparePlaylistReview() }.keyboardShortcut(.defaultAction).disabled(!model.playlistOrderDrafts.isEmpty)
             }.disabled(!model.playlistEditable)
         }.padding(24).frame(width: 630)
     }

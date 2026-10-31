@@ -34,8 +34,22 @@ current matches once; only a pick toggle, pending remove button, or
 **Clear Selection** removes picks. Final submission reads the same ordered pending
 selection displayed in the sheet.
 
-Table headers apply temporary sorting. **Save Current Sort as Playlist Order**
-records the complete ordinary Playlist order and Manual sort in one undoable edit.
+Up/down and dragging preview an ordinary Playlist's order locally, without helper
+edits or reloading after each move. Changed positions and titles turn orange;
+**Save Order** submits the complete order and Manual sort in one undoable draft
+edit. **Restore Order** cancels the local moves without a helper request. Writing
+the iPod still requires **Review Changes** and **Save to iPod**.
+
+Local order previews survive switching Playlists and refreshing their entries.
+Removed occurrences leave the preview; newly added occurrences follow its existing
+entries in helper order. Repeated Tracks retain separate occurrence identities.
+Review and saved-sort changes require saving or restoring pending local orders
+first. Closing, switching devices, ejecting, and removal also protect these local
+changes, even when the helper draft is clean. Discard explicitly clears both kinds
+of pending changes; disconnect invalidates local previews along with the draft.
+
+Table headers apply temporary sorting. **Save Current Sort as Playlist Order** (or
+**Save Order**) records that displayed order as a single draft edit.
 Manual dragging and movement require the complete list, no search filter, and no
 temporary sort. Smart Playlists expose their saved presentation sort separately
 from the rule limit's selection order.

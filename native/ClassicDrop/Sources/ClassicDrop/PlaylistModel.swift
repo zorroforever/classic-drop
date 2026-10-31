@@ -11,9 +11,16 @@ struct PlaylistEditorState: Identifiable {
 }
 enum PlaylistLifecycle { case select(String), eject, close, removal }
 
+struct PlaylistOrderDraft {
+    let originalEntryIDs: [String]
+    let orderedEntryIDs: [String]
+}
+
 extension AppModel {
     var activePlaylist: PlaylistSummaryDTO? { playlistItems.first { $0.id == selectedPlaylist } }
     var playlistEditable: Bool { writable && playlistDraft?.locked != true }
+    var hasUnsavedPlaylistChanges: Bool { playlistDraft?.dirty == true || !playlistOrderDrafts.isEmpty }
+    var hasLocalPlaylistOrder: Bool { selectedPlaylist.map { playlistOrderDrafts[$0] != nil } ?? false }
     var smartPreviewRunning: Bool { busy && task?.command == "playlist_preview" }
     func cancelSmartPreview() {
         guard smartPreviewRunning, !cancelRequested else { return }
@@ -26,16 +33,46 @@ extension AppModel {
         activePlaylist?.canEditEntries == true && [0, 1].contains(activePlaylist?.sortOrder ?? -1)
     }
     var sortedPlaylistEntries: [PlaylistEntryDTO] {
-        playlistSortOrder.isEmpty ? playlistEntries : playlistEntries.sorted(using: playlistSortOrder)
+        var entries = playlistEntries
+        if let id = selectedPlaylist, let draft = playlistOrderDrafts[id], draft.originalEntryIDs == entries.map(\.id) {
+            let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+            entries = draft.orderedEntryIDs.compactMap { byID[$0] }
+        }
+        return playlistSortOrder.isEmpty ? entries : entries.sorted(using: playlistSortOrder)
     }
     var canSaveDisplayedPlaylistOrder: Bool {
-        playlistEditable && playlistEntriesComplete && playlistQuery.isEmpty && !playlistSortOrder.isEmpty && activePlaylist?.canEditEntries == true
+        playlistEditable && playlistEntriesComplete && playlistQuery.isEmpty &&
+        (hasLocalPlaylistOrder || !playlistSortOrder.isEmpty) && activePlaylist?.canEditEntries == true
+    }
+    func restorePlaylistOrder() {
+        guard playlistEditable, let id = selectedPlaylist else { return }
+        playlistOrderDrafts.removeValue(forKey: id); playlistSortOrder = []
+    }
+    private func stagePlaylistOrder(_ order: [String]) {
+        guard let id = selectedPlaylist else { return }
+        let original = playlistEntries.map(\.id)
+        guard order.count == original.count, Set(order) == Set(original) else { return }
+        if order == original { playlistOrderDrafts.removeValue(forKey: id) }
+        else { playlistOrderDrafts[id] = PlaylistOrderDraft(originalEntryIDs: original, orderedEntryIDs: order) }
+        invalidatePlaylistReview()
+    }
+    // Keep local moves through refreshes and membership edits, using occurrence identities.
+    func reconcilePlaylistOrder(_ id: String, entries: [PlaylistEntryDTO]) {
+        guard let draft = playlistOrderDrafts[id] else { return }
+        let original = entries.map(\.id), available = Set(original)
+        let old = Set(draft.orderedEntryIDs)
+        let order = draft.orderedEntryIDs.filter { available.contains($0) } + original.filter { !old.contains($0) }
+        if order == original { playlistOrderDrafts.removeValue(forKey: id) }
+        else { playlistOrderDrafts[id] = PlaylistOrderDraft(originalEntryIDs: original, orderedEntryIDs: order) }
     }
     func saveDisplayedPlaylistOrder() {
-        guard canSaveDisplayedPlaylistOrder else { return }
-        var edit = PlaylistEditDTO(action: "reorder_entries", playlistId: selectedPlaylist)
+        guard canSaveDisplayedPlaylistOrder, let id = selectedPlaylist else { return }
+        var edit = PlaylistEditDTO(action: "reorder_entries", playlistId: id)
         edit.entryIds = sortedPlaylistEntries.map(\.id); edit.sortOrder = 1
-        mutatePlaylist(edit) { self.playlistSortOrder = [] }
+        mutatePlaylist(edit) {
+            self.playlistOrderDrafts.removeValue(forKey: id)
+            if self.selectedPlaylist == id { self.playlistSortOrder = [] }
+        }
     }
     func acceptPlaylistState(_ result: ResultDTO) {
         if let capabilities = result.capabilities { playlistSupported = capabilities.contains("playlists-v1") }
@@ -50,9 +87,10 @@ extension AppModel {
     }
     func resetPlaylists(warn: Bool, preserveTermination: Bool = false) {
         if !preserveTermination, case .close = pendingLifecycle { terminationReply(false) }
-        let lost = playlistDraft?.dirty == true
+        let lost = hasUnsavedPlaylistChanges
         playlistListEpoch += 1; playlistEntryEpoch += 1; smartPreviewEpoch += 1
         playlistItems = []; playlistDraft = nil; playlistEntries = []; playlistEntriesComplete = false
+        playlistOrderDrafts = [:]
         selectedPlaylist = nil; selectedEntries = []; playlistSortOrder = []; smartFields = []; smartPreview = []
         playlistEditor = nil; playlistDelete = nil; playlistAddSheet = false; playlistTargetSheet = false; playlistTrackTargets = false
         pendingLifecycle = nil; importDestination = ImportDestinationDTO(); importReuse = []
@@ -78,6 +116,8 @@ extension AppModel {
                     page(); return
                 }
                 self.playlistItems = collected
+                let ids = Set(collected.map(\.id))
+                self.playlistOrderDrafts = self.playlistOrderDrafts.filter { ids.contains($0.key) }
                 if let id = self.selectedPlaylist, !collected.contains(where: { $0.id == id }) {
                     self.selectedPlaylist = nil; self.playlistEntries = []; self.selectedEntries = []
                 }
@@ -108,6 +148,7 @@ extension AppModel {
                     guard !rows.isEmpty else { self.error = self.t("playlist.incomplete"); return }
                     page(); return
                 }
+                self.reconcilePlaylistOrder(id, entries: collected)
                 self.playlistEntries = collected; self.playlistEntriesComplete = true
                 self.selectedEntries.formIntersection(Set(collected.map(\.id)))
             }
@@ -116,6 +157,9 @@ extension AppModel {
     }
     func mutatePlaylist(_ edit: PlaylistEditDTO, then: @escaping () -> Void = {}) {
         guard playlistEditable else { return }
+        if edit.action == "update", edit.sortOrder != nil, let id = edit.playlistId, playlistOrderDrafts[id] != nil {
+            error = t("playlist.order.save.first"); return
+        }
         invalidatePlaylistReview()
         let entries = edit.entryIds ?? [], tracks = edit.trackIds ?? []
         func finished(_ result: ResultDTO) {
@@ -147,12 +191,25 @@ extension AppModel {
         guard playlistEditable else { return }
         invalidatePlaylistReview()
         perform(command, foreground: true, configure: { $0.playlistRevision = self.playlistDraft?.revision }) { _ in
+            if command == "playlist_discard" { self.playlistOrderDrafts = [:] }
             self.loadPlaylists(); self.loadPlaylistEntries(); then()
         }
     }
     func changeEntries(_ action: String) {
         guard let id = selectedPlaylist, activePlaylist?.canEditEntries == true, playlistEntriesComplete, !selectedEntries.isEmpty else { return }
-        if action != "remove_entries" && !canReorderEntries { return }
+        if ["move_entries_up", "move_entries_down"].contains(action) {
+            guard canReorderEntries else { return }
+            var order = sortedPlaylistEntries.map(\.id)
+            if action == "move_entries_down" { order.reverse() }
+            if order.count > 1 {
+                for index in 1..<order.count where selectedEntries.contains(order[index]) && !selectedEntries.contains(order[index - 1]) {
+                    order.swapAt(index - 1, index)
+                }
+            }
+            if action == "move_entries_down" { order.reverse() }
+            stagePlaylistOrder(order); return
+        }
+        guard action == "remove_entries" else { return }
         var edit = PlaylistEditDTO(action: action, playlistId: id)
         edit.entryIds = playlistEntries.filter { selectedEntries.contains($0.id) }.map(\.id)
         mutatePlaylist(edit)
@@ -160,11 +217,12 @@ extension AppModel {
     func reorderEntries(dragged: [String], before destination: String) {
         guard canReorderEntries, !dragged.contains(destination) else { return }
         let selected = Set(dragged)
-        var order = playlistEntries.map(\.id).filter { !selected.contains($0) }
+        let current = sortedPlaylistEntries.map(\.id)
+        guard !selected.isEmpty, selected.isSubset(of: Set(current)) else { return }
+        var order = current.filter { !selected.contains($0) }
         guard let index = order.firstIndex(of: destination) else { return }
-        order.insert(contentsOf: playlistEntries.filter { selected.contains($0.id) }.map(\.id), at: index)
-        var edit = PlaylistEditDTO(action: "reorder_entries", playlistId: selectedPlaylist); edit.entryIds = order
-        mutatePlaylist(edit)
+        order.insert(contentsOf: current.filter { selected.contains($0) }, at: index)
+        stagePlaylistOrder(order)
     }
     func previewSmart(_ smart: SmartPlaylistDTO, playlistId: String?) {
         guard !busy else { return }; smartPreviewEpoch += 1
@@ -185,6 +243,7 @@ extension AppModel {
         page()
     }
     func preparePlaylistReview(includeImports: Bool = false) {
+        guard playlistOrderDrafts.isEmpty else { error = t("playlist.order.save.first"); return }
         guard playlistEditable, !includeImports || !queueNeedsPreparation && !queueRequiresReselection else { error = t(queueRequiresReselection ? "playlist.reselect" : "playlist.reprepare"); return }
         saveEdits {
             self.perform("playlist_prepare", foreground: true, configure: {
@@ -207,7 +266,7 @@ extension AppModel {
         }
     }
     func savePlaylistReview() {
-        guard writable, playlistReviewComplete, let review = playlistReview, !review.noChanges else { return }
+        guard writable, playlistOrderDrafts.isEmpty, playlistReviewComplete, let review = playlistReview, !review.noChanges else { return }
         let action = pendingLifecycle
         let selected = selectedPlaylist
         perform("playlist_save", foreground: true, configure: { $0.token = review.token; $0.playlistRevision = self.playlistDraft?.revision }) { result in

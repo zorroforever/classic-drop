@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
     @Published var playlistDraft: PlaylistDraftDTO?
     @Published var playlistEntries: [PlaylistEntryDTO] = []
     @Published var playlistEntriesComplete = false
+    @Published var playlistOrderDrafts: [String: PlaylistOrderDraft] = [:]
     @Published var selectedPlaylist: String?
     @Published var selectedEntries = Set<String>()
     @Published var playlistQuery = ""
@@ -321,7 +322,7 @@ final class AppModel: ObservableObject {
 
     func requestClose() {
         guard !busy else { error = t("playlist.busy.close"); terminationReply(false); return }
-        if playlistDraft?.dirty == true { pendingLifecycle = .close; return }
+        if hasUnsavedPlaylistChanges { pendingLifecycle = .close; return }
         closing = true; monitor?.invalidate()
         perform("close")
     }
@@ -356,7 +357,7 @@ final class AppModel: ObservableObject {
 
     func select(_ id: String) {
         guard !busy || browserPreparing else { return }
-        if playlistDraft?.dirty == true { pendingLifecycle = .select(id); return }
+        if hasUnsavedPlaylistChanges { pendingLifecycle = .select(id); return }
         clearBrowser()
         task = nil
         perform("select", foreground: true, configure: { $0.token = id }) { _ in self.refresh() }
@@ -817,7 +818,7 @@ final class AppModel: ObservableObject {
 
     func prepareRemoval() {
         guard canReviewRemoval else { return }
-        if playlistDraft?.dirty == true { pendingLifecycle = .removal; return }
+        if hasUnsavedPlaylistChanges { pendingLifecycle = .removal; return }
         perform("prepare_delete", foreground: true, configure: { _ in }) { self.review = $0.review }
     }
 
@@ -827,6 +828,7 @@ final class AppModel: ObservableObject {
     }
 
     func restore() {
+        guard playlistOrderDrafts.isEmpty else { error = t("playlist.order.save.first"); return }
         perform("restore", foreground: true, configure: { _ in }) { _ in self.refresh() }
     }
 
@@ -843,7 +845,7 @@ final class AppModel: ObservableObject {
 
     func eject() {
         guard !busy else { return }
-        if playlistDraft?.dirty == true { pendingLifecycle = .eject; return }
+        if hasUnsavedPlaylistChanges { pendingLifecycle = .eject; return }
         perform("eject", foreground: true)
     }
 }

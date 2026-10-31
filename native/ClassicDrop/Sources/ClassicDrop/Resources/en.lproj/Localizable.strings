@@ -351,6 +351,11 @@
 "playlist.recovery.scope" = "Recovery applies to the entire last saved operation, including imported music, Playlists, and playback updates.";
 "playlist.finish.empty" = "Finish without Writing";
 "playlist.sort.save.current" = "Save Current Sort as Playlist Order";
-"playlist.sort.clear" = "Show Saved Order";
+"playlist.sort.clear" = "Clear Column Sort";
+"playlist.order.save" = "Save Order";
+"playlist.order.restore" = "Restore Order";
+"playlist.order.pending" = "Order not saved";
+"playlist.order.save.first" = "Save or restore the pending Playlist order first.";
+"playlist.order.lifecycle" = "Some Playlists have unsaved order changes. Cancel to return and click Save Order or Restore Order in each marked Playlist, or discard all changes here.";
 "playlist.preview.running" = "Calculating Smart Playlist preview…";
 "playlist.preview.cancel" = "Cancel Preview";

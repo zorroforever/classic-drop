@@ -382,6 +382,11 @@
 "playlist.recovery.scope" = "恢复将还原整个上次保存的操作，包括导入音乐、播放列表及播放统计更新。";
 "playlist.finish.empty" = "完成（不写入）";
 "playlist.sort.save.current" = "将当前排序保存为列表顺序";
-"playlist.sort.clear" = "显示保存顺序";
+"playlist.sort.clear" = "清除列排序";
+"playlist.order.save" = "保存顺序";
+"playlist.order.restore" = "还原顺序";
+"playlist.order.pending" = "顺序未保存";
+"playlist.order.save.first" = "请先保存或还原播放列表中待保存的顺序。";
+"playlist.order.lifecycle" = "部分播放列表的顺序尚未保存。请取消并返回带标记的播放列表，点击「保存顺序」或「还原顺序」；也可以在此放弃全部更改。";
 "playlist.preview.running" = "正在计算智能播放列表预览…";
 "playlist.preview.cancel" = "取消预览";

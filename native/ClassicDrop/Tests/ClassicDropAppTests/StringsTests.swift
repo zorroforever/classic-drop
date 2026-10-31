@@ -19,4 +19,19 @@ final class StringsTests: XCTestCase {
         }
         XCTAssertEqual(strings.text("unknown.test.key"), "unknown.test.key")
     }
+
+    func testPlaylistOrderTranslationsArePackaged() {
+        let saved = UserDefaults.standard.object(forKey: "native.language")
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: "native.language") }
+            else { UserDefaults.standard.removeObject(forKey: "native.language") }
+        }
+        let strings = Strings()
+        for language in ["en", "ja", "zh-Hans"] {
+            strings.language = language
+            for key in ["playlist.order.save", "playlist.order.restore", "playlist.order.pending", "playlist.order.save.first", "playlist.order.lifecycle"] {
+                XCTAssertNotEqual(strings.text(key), key, language + ": " + key)
+            }
+        }
+    }
 }

@@ -215,6 +215,157 @@ final class PlaylistModelTests: XCTestCase {
         XCTAssertEqual(connection.requests.last?.playlistEdit?.sortOrder, 1)
         XCTAssertEqual(connection.requests.last?.playlistEdit?.entryIds, ["b", "a", "c"])
     }
+
+    @MainActor func testRepeatedMovesPreviewLocallyAndSaveOneCompleteOrder() throws {
+        let (model, connection) = try connected()
+        model.playlistEntries = try orderEntries()
+        model.playlistEntriesComplete = true
+        model.selectedEntries = ["c"]
+        let count = connection.requests.count
+        model.changeEntries("move_entries_up")
+        model.changeEntries("move_entries_up")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["c", "a", "b"])
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertTrue(model.canSaveDisplayedPlaylistOrder)
+        model.saveDisplayedPlaylistOrder()
+        XCTAssertEqual(connection.requests.count, count + 1)
+        XCTAssertEqual(connection.requests.last?.playlistEdit?.action, "reorder_entries")
+        XCTAssertEqual(connection.requests.last?.playlistEdit?.entryIds, ["c", "a", "b"])
+        XCTAssertEqual(connection.requests.last?.playlistEdit?.sortOrder, 1)
+        XCTAssertFalse(connection.requests.contains { $0.command == "playlist_save" })
+    }
+
+    @MainActor func testRepeatedDragsPreviewLocallyUntilSave() throws {
+        let (model, connection) = try connected()
+        model.playlistEntries = try orderEntries()
+        model.playlistEntriesComplete = true
+        let count = connection.requests.count
+        model.reorderEntries(dragged: ["c"], before: "b")
+        model.reorderEntries(dragged: ["c"], before: "a")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["c", "a", "b"])
+        XCTAssertEqual(connection.requests.count, count)
+        model.saveDisplayedPlaylistOrder()
+        XCTAssertEqual(connection.requests.last?.playlistEdit?.entryIds, ["c", "a", "b"])
+    }
+
+    @MainActor func testLocalBlockMovesBoundariesAndRestoreNeverContactHelper() throws {
+        let (model, connection) = try connected()
+        model.playlistEntries = try orderEntries(); model.playlistEntriesComplete = true
+        let count = connection.requests.count
+        model.selectedEntries = ["b", "c"]; model.changeEntries("move_entries_up")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["b", "c", "a"])
+        model.changeEntries("move_entries_up")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["b", "c", "a"])
+        model.changeEntries("move_entries_down")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["a", "b", "c"])
+        XCTAssertFalse(model.hasLocalPlaylistOrder)
+        model.selectedEntries = ["a", "c"]; model.changeEntries("move_entries_up")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["a", "c", "b"])
+        model.restorePlaylistOrder()
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["a", "b", "c"])
+        model.changeEntries("move_entries_down")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["b", "a", "c"])
+        model.restorePlaylistOrder()
+        XCTAssertFalse(model.canSaveDisplayedPlaylistOrder)
+        XCTAssertEqual(connection.requests.count, count)
+    }
+
+    @MainActor func testFailedOrderSaveRetainsPreviewForRetryAndSuccessClearsIt() throws {
+        let (model, connection) = try connected()
+        model.playlistEntries = try orderEntries(); model.playlistEntriesComplete = true
+        model.selectedEntries = ["c"]; model.changeEntries("move_entries_up")
+        model.saveDisplayedPlaylistOrder()
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "playlist_edit" })
+        let failed = """
+        {"version":1,"id":"\(request.id)","event":"error","generation":"g","sequence":1,"code":"invalid_request","detail":"Try again"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(failed.utf8)))
+        XCTAssertTrue(model.hasLocalPlaylistOrder)
+        XCTAssertTrue(model.canSaveDisplayedPlaylistOrder)
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["a", "c", "b"])
+        model.saveDisplayedPlaylistOrder()
+        XCTAssertEqual(connection.requests.last?.playlistEdit?.entryIds, ["a", "c", "b"])
+        try connection.reply("playlist_edit", extra: draft.replacingOccurrences(of: "p1", with: "p2"))
+        XCTAssertFalse(model.hasLocalPlaylistOrder)
+        try connection.reply("playlist_entries", extra: entryResult(["a", "c", "b"], revision: "p2"))
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["a", "c", "b"])
+        XCTAssertFalse(model.canSaveDisplayedPlaylistOrder)
+        XCTAssertFalse(connection.requests.contains { $0.command == "playlist_save" })
+    }
+
+    @MainActor func testLocalOrdersSurviveNavigationAndMembershipRefresh() throws {
+        let (model, connection) = try connected()
+        model.playlistItems.append(try summary(id: "2"))
+        model.playlistEntries = try orderEntries(); model.playlistEntriesComplete = true
+        model.reorderEntries(dragged: ["c"], before: "a")
+        model.openPlaylist("2")
+        try connection.reply("playlist_entries", extra: entryResult(["d", "e", "f"]))
+        model.selectedEntries = ["e"]; model.changeEntries("move_entries_up")
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["e", "d", "f"])
+        model.openPlaylist("-1")
+        try connection.reply("playlist_entries", extra: entryResult(["a", "b", "c", "new"]))
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["c", "a", "b", "new"])
+        model.loadPlaylistEntries()
+        try connection.reply("playlist_entries", extra: entryResult(["a", "c", "new"]))
+        XCTAssertEqual(model.sortedPlaylistEntries.map(\.id), ["c", "a", "new"])
+        model.saveDisplayedPlaylistOrder()
+        XCTAssertEqual(connection.requests.last?.playlistEdit?.entryIds, ["c", "a", "new"])
+        try connection.reply("playlist_edit", extra: draft.replacingOccurrences(of: "p1", with: "p2"))
+        XCTAssertNil(model.playlistOrderDrafts["-1"])
+        XCTAssertNotNil(model.playlistOrderDrafts["2"])
+    }
+
+    @MainActor func testLocalOrderBlocksReviewAndLifecycleEvenWithCleanHelperDraft() throws {
+        let (model, connection) = try connected()
+        model.state = try Wire.decoder.decode(StateDTO.self, from: Data(#"{"generation":"g","revision":"r","active_id":"device","active_name":"Test","available_bytes":100,"total_bytes":200,"track_count":2,"queue_count":0,"package_count":1,"can_restore":false,"writes_allowed":true,"recovery_path":""}"#.utf8))
+        model.playlistDraft = try Wire.decoder.decode(PlaylistDraftDTO.self, from: Data(#"{"revision":"p1","dirty":false,"can_undo":false,"can_redo":false,"locked":false,"changed_ids":[],"deleted_ids":[]}"#.utf8))
+        model.playlistEntries = try orderEntries(); model.playlistEntriesComplete = true
+        model.playlistReview = try Wire.decoder.decode(PlaylistReviewDTO.self, from: Data(review.utf8)); model.playlistReviewComplete = true
+        model.reorderEntries(dragged: ["c"], before: "a")
+        XCTAssertNil(model.playlistReview)
+        XCTAssertTrue(model.hasUnsavedPlaylistChanges)
+        let count = connection.requests.count
+        model.preparePlaylistReview(); model.savePlaylistReview(); model.restore()
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertFalse(model.error.isEmpty)
+        model.eject(); XCTAssertNotNil(model.pendingLifecycle); model.cancelLifecycle()
+        model.select("other"); XCTAssertNotNil(model.pendingLifecycle); model.cancelLifecycle()
+        model.prepareRemoval(); XCTAssertNotNil(model.pendingLifecycle); model.cancelLifecycle()
+        model.terminationReply = { _ in }
+        model.requestClose(); XCTAssertNotNil(model.pendingLifecycle); model.cancelLifecycle()
+        XCTAssertEqual(connection.requests.count, count)
+        model.restorePlaylistOrder()
+        XCTAssertFalse(model.hasUnsavedPlaylistChanges)
+    }
+
+    @MainActor func testDiscardAndHelperLossClearLocalOrderWithoutSaving() throws {
+        let (model, connection) = try connected()
+        model.playlistEntries = try orderEntries(); model.playlistEntriesComplete = true
+        model.reorderEntries(dragged: ["c"], before: "a")
+        model.playlistHistory("playlist_discard")
+        try connection.reply("playlist_discard", extra: draft.replacingOccurrences(of: "p1", with: "p2"))
+        XCTAssertTrue(model.playlistOrderDrafts.isEmpty)
+        try connection.reply("playlist_entries", extra: entryResult(["a", "b", "c"], revision: "p2"))
+        model.reorderEntries(dragged: ["c"], before: "a")
+        connection.onExit?(1)
+        XCTAssertTrue(model.playlistOrderDrafts.isEmpty)
+        XCTAssertFalse(connection.requests.contains { $0.command == "playlist_save" })
+    }
+
+    private func entryResult(_ ids: [String], revision: String = "p1") -> String {
+        let rows = ids.enumerated().map { index, id in
+            """
+            {"entry_id":"\(id)","track_id":"1","index":\(index),"position":\(index),"missing_reference":true,"track":null}
+            """
+        }.joined(separator: ",")
+        return draft.replacingOccurrences(of: "p1", with: revision) + ",\"playlist_entries\":[\(rows)],\"total\":\(ids.count)"
+    }
+
+    private func orderEntries() throws -> [PlaylistEntryDTO] {
+        let json = #"[{"entry_id":"a","track_id":"1","index":0,"position":0,"missing_reference":false,"track":{"id":"1","title":"First","artist":"A","album":"B","album_artist":"A","length_ms":1000,"artwork_id":"0"}},{"entry_id":"b","track_id":"2","index":1,"position":1,"missing_reference":false,"track":{"id":"2","title":"Middle","artist":"A","album":"B","album_artist":"A","length_ms":1000,"artwork_id":"0"}},{"entry_id":"c","track_id":"1","index":2,"position":2,"missing_reference":false,"track":{"id":"1","title":"Repeated First","artist":"A","album":"B","album_artist":"A","length_ms":1000,"artwork_id":"0"}}]"#
+        return try Wire.decoder.decode([PlaylistEntryDTO].self, from: Data(json.utf8))
+    }
     @MainActor func testDisconnectAndHelperLossCancelPendingTermination() throws {
         let (model, connection) = try connected()
         var replies: [Bool] = []; model.terminationReply = { replies.append($0) }

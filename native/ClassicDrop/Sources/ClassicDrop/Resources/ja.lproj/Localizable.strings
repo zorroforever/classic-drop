@@ -382,6 +382,11 @@
 "playlist.recovery.scope" = "復元は、読み込んだ曲、プレイリスト、再生統計を含む、最後に保存した操作全体に適用されます。";
 "playlist.finish.empty" = "書き込まずに完了";
 "playlist.sort.save.current" = "現在の並び順をプレイリスト順序として保存";
-"playlist.sort.clear" = "保存された順序を表示";
+"playlist.sort.clear" = "列の並べ替えを解除";
+"playlist.order.save" = "順序を保存";
+"playlist.order.restore" = "順序を元に戻す";
+"playlist.order.pending" = "順序は未保存";
+"playlist.order.save.first" = "先にプレイリストの未保存の順序を保存するか、元に戻してください。";
+"playlist.order.lifecycle" = "順序が未保存のプレイリストがあります。キャンセルして印の付いた各プレイリストで「順序を保存」または「順序を元に戻す」を選ぶか、ここですべての変更を破棄してください。";
 "playlist.preview.running" = "スマートプレイリストのプレビューを計算中…";
 "playlist.preview.cancel" = "プレビューをキャンセル";
