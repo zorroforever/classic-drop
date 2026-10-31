@@ -140,6 +140,10 @@ class ClassicDropEngine:
         self._entries: dict[Path, PreviewEntry] = {}
         self._failed_mounts: dict[PhysicalDeviceId, DeviceMountIssue] = {}
         self._ejected_devices: set[PhysicalDeviceId] = set()
+        self._import_revision = uuid4().hex
+        from classic_drop.library_changes import PlaylistLibraryChanges
+
+        self.library_changes = PlaylistLibraryChanges(self)
 
     @property
     def active(self) -> ActiveIPod:
@@ -408,6 +412,7 @@ class ClassicDropEngine:
         self._songs.update(songs)
         self._entries = {entry.path: entry for entry in entries}
         self._preview_alac_original = allow_high_resolution_alac
+        self._import_revision = uuid4().hex
         return tuple(entries)
 
     def _media_progress(
@@ -512,23 +517,38 @@ class ClassicDropEngine:
             )
         return "new", source_text("No matching queue item or iPod track found")
 
-    def commit(
+    @property
+    def import_revision(self) -> str:
+        """Opaque preparation revision; the UI separately owns edited queue intent."""
+        return self._import_revision
+
+    @property
+    def prepared_entries(self) -> tuple[PreviewEntry, ...]:
+        return tuple(self._entries.values())
+
+    @property
+    def import_original_alac(self) -> bool:
+        """The explicit batch policy retained with the prepared Host sources."""
+        return self._preview_alac_original
+
+    def validate_import_entries(
         self, entries: tuple[PreviewEntry, ...], cancelled: Event
-    ) -> ImportResult:
+    ) -> tuple[tuple[PreviewEntry, PreparedSong], ...]:
+        """Recheck selected Host sources without adopting or mutating a Library."""
+
         def checkpoint() -> None:
             self._checkpoint(cancelled)
 
         checkpoint()
         active = self.active
-        self._require_writes_allowed()
         if active is not self._preview_active:
             raise ValueError(
                 source_text("The device or library changed; preview again")
             )
         selected = tuple(e for e in entries if e.selected)
-        if not selected:
-            raise ValueError(source_text("Select at least one song to import"))
-        prepared = []
+        if len({entry.token for entry in selected}) != len(selected):
+            raise ValueError("The import selection contains a repeated token")
+        prepared: list[tuple[PreviewEntry, PreparedSong]] = []
         self.progress(
             WriteProgress("source.verify", "Verifying source files", 0, len(selected))
         )
@@ -568,24 +588,21 @@ class ClassicDropEngine:
                     item.path.name,
                 )
             )
-        # Validate the retained database before the explicit commit's history
-        # reconciliation. Initial selection and preview never reconcile it.
-        with self.coordinator.sync_session(active):
-            checkpoint()
-        self.progress(WriteProgress("history", "Keeping playback history"))
-        active = self.coordinator.select_device(
-            active.candidate.id,
-            reconcile_metadata=False,
-            reconcile_sidecars=True,
-            initialize_missing=False,
-        )
-        identity = self._identity()
+        return tuple(prepared)
+
+    def build_import_workspace(
+        self,
+        snapshot: LibrarySnapshot,
+        prepared: tuple[tuple[PreviewEntry, PreparedSong], ...],
+    ) -> tuple[LibraryWorkspace, tuple[int, ...]]:
+        """Build a private append candidate, retaining source order and Host resources."""
         workspace = LibraryWorkspace()
-        workspace.load(active.library)
+        workspace.load(snapshot)
         allocator = MusicPathAllocator(
-            active.profile.capabilities.database.music_directory_count,
-            (t.metadata.location for t in active.library.tracks),
+            self.active.profile.capabilities.database.music_directory_count,
+            (t.metadata.location for t in snapshot.tracks),
         )
+        added_ids: list[int] = []
         for entry, item in prepared:
             song = item.song
             track = replace(
@@ -602,6 +619,34 @@ class ClassicDropEngine:
                 song, allocator.allocate(Path(song.track.metadata.location).suffix[1:])
             )
             workspace.add_songs((song,), workspace.edit_revision)
+            added_ids.append(workspace.tracks[-1].track_id)
+        return workspace, tuple(added_ids)
+
+    def commit(
+        self, entries: tuple[PreviewEntry, ...], cancelled: Event
+    ) -> ImportResult:
+        def checkpoint() -> None:
+            self._checkpoint(cancelled)
+
+        checkpoint()
+        self._require_writes_allowed()
+        active = self.active
+        if not any(entry.selected for entry in entries):
+            raise ValueError(source_text("Select at least one song to import"))
+        prepared = self.validate_import_entries(entries, cancelled)
+        # Validate the retained database before the explicit commit's history
+        # reconciliation. Initial selection and preview never reconcile it.
+        with self.coordinator.sync_session(active):
+            checkpoint()
+        self.progress(WriteProgress("history", "Keeping playback history"))
+        active = self.coordinator.select_device(
+            active.candidate.id,
+            reconcile_metadata=False,
+            reconcile_sidecars=True,
+            initialize_missing=False,
+        )
+        identity = self._identity()
+        workspace, _added_ids = self.build_import_workspace(active.library, prepared)
         review = self.coordinator.prepare_library(
             LibraryPreparationRequest(
                 workspace.desired_snapshot(),
@@ -866,6 +911,7 @@ class ClassicDropEngine:
         self.discard()
 
     def discard(self) -> None:
+        self.library_changes.invalidate()
         self._removal_review = None
         self._resources.close()
         self._resources = ExitStack()
@@ -873,6 +919,7 @@ class ClassicDropEngine:
         self._entries.clear()
         self._preview_active = None
         self._preview_alac_original = False
+        self._import_revision = uuid4().hex
 
     def close(self) -> None:
         self.discard()

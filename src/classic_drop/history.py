@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Literal, cast
+
+type LibraryOperation = Literal["import", "playlist", "delete"]
 
 
 class ImportHistory:
@@ -59,20 +62,22 @@ class ImportHistory:
             ).fetchone()
             return str(row[0]) if row else None
 
-    def record_operation(self, device: str, recovery: str, operation: str) -> None:
+    def record_operation(
+        self, device: str, recovery: str, operation: LibraryOperation
+    ) -> None:
         with self._connection() as db:
             db.execute(
                 "INSERT INTO import_run(device,recovery,operation) VALUES(?,?,?)",
                 (device, recovery, operation),
             )
 
-    def latest_operation(self, device: str) -> tuple[str, str] | None:
+    def latest_operation(self, device: str) -> tuple[str, LibraryOperation] | None:
         with self._connection() as db:
             row = db.execute(
                 "SELECT recovery, operation FROM import_run WHERE device=? AND restored=0 AND kept=0 ORDER BY id DESC LIMIT 1",
                 (device,),
             ).fetchone()
-            return (str(row[0]), str(row[1])) if row else None
+            return (str(row[0]), cast("LibraryOperation", row[1])) if row else None
 
     def keep_current(self, device: str, recovery: str) -> None:
         """Accept a completed removal without allowing undo across its baseline."""
