@@ -18,6 +18,15 @@ struct ImportView: View {
                 Text(t(model.queue.isEmpty ? (model.alacOriginalImport ? "alac.original.on" : "alac.original.off") : "alac.original.locked"))
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            if model.playlistSupported {
+                HStack {
+                    Button(t("playlist.import.destination")) { model.playlistTargetSheet = true }.disabled(!model.playlistEditable)
+                    Text(model.queueRequiresReselection ? t("playlist.reselect") : model.importDestination.playlistIds.isEmpty && model.importDestination.newName == nil ? t("playlist.import.library") : t("playlist.import.selected")).font(.caption).foregroundStyle(model.queueRequiresReselection ? Color.orange : Color.secondary)
+                    Spacer()
+                    if model.queueNeedsPreparation { Button(t("playlist.reprepare")) { model.reprepareQueue() }.disabled(!model.playlistEditable) }
+                    Button(t(model.playlistDraft?.dirty == true ? "playlist.check.combined" : "playlist.check.import")) { model.preparePlaylistReview(includeImports: true) }.disabled(!model.writable || model.queueNeedsPreparation)
+                }.padding(.horizontal, 16).padding(.bottom, 12)
+            }
             Divider()
         if model.queue.isEmpty {
             EmptyWorkspace(symbol: "music.note.list", title: t("queue.empty"), detail: t("queue.hint")) {
@@ -34,6 +43,12 @@ struct ImportView: View {
                         Text(t("songs")).tag("all")
                         ForEach(["new", "confirmed_duplicate", "history_match", "possible_duplicate", "check_incomplete", "error"], id: \.self) { Text(t($0)).tag($0) }
                     }.frame(width: 150)
+                    if model.playlistSupported {
+                        Button { model.moveQueue(up: true) } label: { Image(systemName: "arrow.up") }.help(t("playlist.up"))
+                            .disabled(model.busy || model.selectedQueue == nil || !search.isEmpty || status != "all" || model.queueNeedsPreparation || model.queue.count != model.state?.queueCount)
+                        Button { model.moveQueue(up: false) } label: { Image(systemName: "arrow.down") }.help(t("playlist.down"))
+                            .disabled(model.busy || model.selectedQueue == nil || !search.isEmpty || status != "all" || model.queueNeedsPreparation || model.queue.count != model.state?.queueCount)
+                    }
                     Menu {
                         Button(t("select.all")) { for entry in model.queue where entry.status == "new" { model.edit(entry.token) { $0.selected = true } } }
                         Button(t("deselect.all")) { for entry in model.queue { model.edit(entry.token) { $0.selected = false } } }
@@ -44,7 +59,7 @@ struct ImportView: View {
                 Table(visible, selection: $model.selectedQueue) {
                     TableColumn(t("include")) { entry in
                         Toggle("", isOn: Binding(get: { model.edits[entry.token]?.selected ?? entry.selected }, set: { value in model.edit(entry.token) { $0.selected = value } }))
-                            .labelsHidden().disabled(model.busy || entry.status != "new")
+                            .labelsHidden().disabled(model.busy || entry.status != "new" && !model.importReuse.contains { $0.token == entry.token })
                     }.width(42)
                     TableColumn(t("title")) { entry in
                         TextField(t("title"), text: Binding(get: { model.edits[entry.token]?.title ?? entry.title }, set: { value in model.edit(entry.token) { $0.title = value } }))
@@ -153,6 +168,7 @@ struct InspectorView: View {
             Section {
                 Text(t(entry.status)).font(.headline)
                 if entry.status != "new" && entry.status != "error" {
+                    if model.playlistSupported { ImportReusePicker(token: entry.token) }
                     Text(t("duplicate.hint")).font(.caption).foregroundStyle(.secondary)
                     Toggle(t("duplicate.override"), isOn: Binding(get: { model.edits[entry.token]?.allowDuplicate ?? false }, set: { value in
                         model.edit(entry.token) { $0.allowDuplicate = value; $0.selected = value }
@@ -164,7 +180,7 @@ struct InspectorView: View {
                 Text(t("status"))
             }
         }
-        .disabled(model.busy || entry.status == "error")
+        .disabled(model.busy || entry.status == "error" || model.queueNeedsPreparation)
     }
     private func textBinding(_ entry: PreviewDTO, key: String) -> Binding<String> {
         let value = model.edits[entry.token] ?? EditDTO(entry)

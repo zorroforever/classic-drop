@@ -3,7 +3,7 @@ import SwiftUI
 import ClassicDropCore
 
 enum Workspace: String, CaseIterable, Identifiable {
-    case library, incoming, removal, recovery
+    case library, incoming, removal, recovery, playlist
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -11,6 +11,7 @@ enum Workspace: String, CaseIterable, Identifiable {
         case .incoming: return "plus"
         case .removal: return "trash"
         case .recovery: return "clock.arrow.circlepath"
+        case .playlist: return "music.note.list"
         }
     }
 }
@@ -61,6 +62,35 @@ final class AppModel: ObservableObject {
     @Published var trackTotal = 0
     @Published var detailTotal = 0
     @Published var matchTotal = 0
+    @Published var playlistSupported = false
+    @Published var playlistItems: [PlaylistSummaryDTO] = []
+    @Published var playlistDraft: PlaylistDraftDTO?
+    @Published var playlistEntries: [PlaylistEntryDTO] = []
+    @Published var playlistEntriesComplete = false
+    @Published var selectedPlaylist: String?
+    @Published var selectedEntries = Set<String>()
+    @Published var playlistQuery = ""
+    @Published var playlistSortOrder: [KeyPathComparator<PlaylistEntryDTO>] = []
+    @Published var playlistEditor: PlaylistEditorState?
+    @Published var playlistReview: PlaylistReviewDTO?
+    @Published var playlistReviewComplete = false
+    @Published var smartFields: [SmartFieldDTO] = []
+    @Published var smartPreview: [TrackDTO] = []
+    @Published var smartPreviewTotal = 0
+    @Published var smartPreviewCalculated = false
+    @Published var importDestination = ImportDestinationDTO()
+    @Published var importReuse: [ImportReuseDTO] = []
+    @Published var queueNeedsPreparation = false
+    @Published var queueRequiresReselection = false
+    @Published var playlistTargetSheet = false
+    @Published var playlistAddSheet = false
+    @Published var playlistTrackTargets = false
+    @Published var playlistDelete: PlaylistSummaryDTO?
+    @Published var pendingLifecycle: PlaylistLifecycle?
+    var playlistListEpoch = 0
+    var terminationReply: (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
+    var playlistEntryEpoch = 0
+    var smartPreviewEpoch = 0
     let strings = Strings()
     private var client: any HelperConnection
     private struct Pending {
@@ -69,6 +99,7 @@ final class AppModel: ObservableObject {
         let token: String?
         let ids: [String]
         let epoch: Int
+        let playlistRevision: String?
         let completion: ((ResultDTO) -> Void)?
     }
     private var pending: [String: Pending] = [:]
@@ -112,6 +143,7 @@ final class AppModel: ObservableObject {
     }
     var writable: Bool { ready && connected && state?.writesAllowed == true && !busy && !unknownWrite }
     var t: (String) -> String { strings.text }
+    var playlistAvailableTracks: [TrackDTO] { allTracks }
 
     func start() {
         client.onEvent = { [weak self] event in self?.receive(event) }
@@ -140,10 +172,11 @@ final class AppModel: ObservableObject {
         if foreground && busy { return }
         var request = RequestDTO(command, generation: state?.generation ?? "")
         request.revision = state?.revision
+        request.playlistRevision = playlistDraft?.revision
         configure(&request)
         if foreground { cancelRequested = false; task = TaskState(id: request.id, command: command) }
         if command == "prepare_browser" { preparationID = request.id }
-        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, ids: request.ids ?? [], epoch: browserEpoch, completion: completion)
+        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, ids: request.ids ?? [], epoch: browserEpoch, playlistRevision: request.playlistRevision, completion: completion)
         if command == "audio_formats" { audioRequestID = request.id }
         do { try client.send(request) }
         catch {
@@ -182,9 +215,14 @@ final class AppModel: ObservableObject {
             dispatchAudioFormats()
         }
         guard !ignoredAudio, operation.epoch == browserEpoch else { return }
-        let stateCommand = ["hello", "discover", "select", "commit", "delete", "restore", "eject"].contains(operation.command)
+        let playlistRead = ["playlist_list", "playlist_entries", "playlist_fields", "playlist_preview", "playlist_review"].contains(operation.command)
+        if playlistRead, let revision = operation.playlistRevision, revision != playlistDraft?.revision { return }
+        let stateCommand = ["hello", "discover", "select", "commit", "delete", "restore", "eject", "playlist_save"].contains(operation.command)
         if !stateCommand, let result = envelope.result, result.state.generation != state?.generation { return }
-        if let result = envelope.result { apply(result.state) }
+        if let result = envelope.result {
+            apply(result.state, warnPlaylistLoss: operation.command != "playlist_save")
+            acceptPlaylistState(result)
+        }
         if envelope.event == "error" {
             if operation.command == "audio_formats" {
                 for id in operation.ids { audioFormats[id] = AudioFormatDTO(id: id, detail: envelope.detail) }
@@ -214,7 +252,7 @@ final class AppModel: ObservableObject {
         operation.completion?(result)
     }
 
-    private func clearBrowser() {
+    func clearBrowser() {
         if let id = preparationID {
             var cancel = RequestDTO("cancel"); cancel.token = id
             try? client.send(cancel)
@@ -235,8 +273,9 @@ final class AppModel: ObservableObject {
         albumLoad += 1; trackLoad += 1; detailLoad += 1
     }
 
-    private func apply(_ new: StateDTO) {
+    private func apply(_ new: StateDTO, warnPlaylistLoss: Bool = true) {
         if let old = state, old.generation != new.generation {
+            resetPlaylists(warn: warnPlaylistLoss, preserveTermination: !warnPlaylistLoss)
             clearBrowser()
             queue = []; edits = [:]; selectedQueue = nil; dirty = []
             alacOriginalImport = false
@@ -259,12 +298,13 @@ final class AppModel: ObservableObject {
     private func helperExited(_ status: Int32) {
         ready = false
         pending.removeAll()
-        if closing && !client.running { NSApp.reply(toApplicationShouldTerminate: true); return }
+        if closing && !client.running { terminationReply(true); return }
         if busy {
-            unknownWrite = ["commit", "delete", "restore"].contains(task?.command ?? "")
+            unknownWrite = ["commit", "delete", "restore", "playlist_save"].contains(task?.command ?? "")
             task?.finish(code: unknownWrite ? "unknown" : "failed", detail: t(unknownWrite ? "write.unknown" : "helper.stopped"))
         }
         clearBrowser()
+        resetPlaylists(warn: false)
         artworkInFlight = []
         speculativeArtwork = []
         audioRequestID = nil
@@ -280,6 +320,8 @@ final class AppModel: ObservableObject {
     }
 
     func requestClose() {
+        guard !busy else { error = t("playlist.busy.close"); terminationReply(false); return }
+        if playlistDraft?.dirty == true { pendingLifecycle = .close; return }
         closing = true; monitor?.invalidate()
         perform("close")
     }
@@ -314,6 +356,7 @@ final class AppModel: ObservableObject {
 
     func select(_ id: String) {
         guard !busy || browserPreparing else { return }
+        if playlistDraft?.dirty == true { pendingLifecycle = .select(id); return }
         clearBrowser()
         task = nil
         perform("select", foreground: true, configure: { $0.token = id }) { _ in self.refresh() }
@@ -321,6 +364,7 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         guard connected else { return }
+        if playlistSupported { loadPlaylists() }
         if browserReady { applyLibraryFilter(); loadFacets(); filter(); loadPackage(); return }
         guard !browserPreparing, !busy else { return }
         browserPreparing = true
@@ -618,13 +662,13 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addFiles(folder: Bool) {
+    func addFiles(folder: Bool, playlistId: String? = nil) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = folder; panel.canChooseFiles = !folder
         panel.allowsMultipleSelection = true
         panel.begin { [weak self] response in
             guard response == .OK, let self else { return }
-            self.prepareImport(paths: panel.urls.map(\.path))
+            self.prepareImport(paths: panel.urls.map(\.path), playlistId: playlistId)
         }
     }
 
@@ -635,20 +679,26 @@ final class AppModel: ObservableObject {
         alacOriginalImport = enabled
     }
 
-    func prepareImport(paths: [String]) {
+    func prepareImport(paths: [String], playlistId: String? = nil) {
         guard writable, !paths.isEmpty else { return }
         workspace = .incoming
         let original = alacOriginalImport
+        let newBatch = queue.isEmpty
         saveEdits {
             self.perform("preview", foreground: true, configure: {
                 $0.paths = paths; $0.allowHighResolutionAlac = original
             }) { result in
                 self.loadQueue(first: result.preview ?? [], total: result.total ?? 0)
+                if self.playlistSupported, newBatch || playlistId != nil {
+                    var destination = ImportDestinationDTO()
+                    if let playlistId { destination.playlistIds = [playlistId] }
+                    self.saveImportDestination(destination)
+                }
             }
         }
     }
 
-    private func loadQueue(first: [PreviewDTO], total: Int) {
+    func loadQueue(first: [PreviewDTO], total: Int) {
         queue = first
         func next() {
             if self.queue.count >= total { return }
@@ -662,10 +712,11 @@ final class AppModel: ObservableObject {
     }
 
     func edit(_ token: String, change: (inout EditDTO) -> Void) {
-        guard !busy else { return }
+        guard !busy, !queueNeedsPreparation else { return }
         guard let entry = queue.first(where: { $0.token == token }) else { return }
         var value = edits[token] ?? EditDTO(entry)
         change(&value); edits[token] = value; dirty.insert(token)
+        invalidatePlaylistReview()
     }
 
     func saveEdits(then completion: @escaping () -> Void) {
@@ -680,6 +731,7 @@ final class AppModel: ObservableObject {
 
     func importMusic() {
         guard writable, queue.count == state?.queueCount else { return }
+        if playlistSupported { preparePlaylistReview(includeImports: true); return }
         saveEdits {
             self.perform("commit", foreground: true, configure: { $0.ids = self.queue.map(\.token) }) { _ in self.refresh() }
         }
@@ -705,6 +757,20 @@ final class AppModel: ObservableObject {
 
     func discard() {
         perform("discard", foreground: true, configure: { _ in }) { _ in self.queue = []; self.edits = [:]; self.dirty = [] }
+    }
+
+    func moveQueue(up: Bool) {
+        guard writable, !queueNeedsPreparation, queue.count == state?.queueCount,
+              let token = selectedQueue, let index = queue.firstIndex(where: { $0.token == token }) else { return }
+        let target = index + (up ? -1 : 1)
+        guard queue.indices.contains(target) else { return }
+        var order = queue.map(\.token); order.swapAt(index, target)
+        invalidatePlaylistReview()
+        saveEdits {
+            self.perform("queue_reorder", foreground: true, configure: { $0.ids = order }) { result in
+                self.loadQueue(first: result.preview ?? [], total: result.total ?? 0)
+            }
+        }
     }
 
     func loadFacets() {
@@ -751,6 +817,7 @@ final class AppModel: ObservableObject {
 
     func prepareRemoval() {
         guard canReviewRemoval else { return }
+        if playlistDraft?.dirty == true { pendingLifecycle = .removal; return }
         perform("prepare_delete", foreground: true, configure: { _ in }) { self.review = $0.review }
     }
 
@@ -774,5 +841,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func eject() { perform("eject", foreground: true) }
+    func eject() {
+        guard !busy else { return }
+        if playlistDraft?.dirty == true { pendingLifecycle = .eject; return }
+        perform("eject", foreground: true)
+    }
 }

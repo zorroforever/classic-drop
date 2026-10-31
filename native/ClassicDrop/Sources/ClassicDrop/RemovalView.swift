@@ -122,6 +122,7 @@ struct RecoveryView: View {
         Form {
             Section {
                 Text(t("recovery.hint")).foregroundStyle(.secondary)
+                if model.playlistSupported { Text(t("playlist.recovery.scope")).font(.caption).foregroundStyle(.secondary) }
             } header: {
                 Label(t("recovery"), systemImage: "clock.arrow.circlepath")
             }

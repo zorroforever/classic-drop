@@ -16,6 +16,10 @@ struct ClassicDropApp: App {
                 Button(model.t("add.files")) { model.addFiles(folder: false) }.keyboardShortcut("o").disabled(!model.writable)
                 Button(model.t("add.folder")) { model.addFiles(folder: true) }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(!model.writable)
             }
+            CommandGroup(replacing: .undoRedo) {
+                Button(model.t("playlist.undo")) { model.playlistHistory("playlist_undo") }.keyboardShortcut("z").disabled(!model.playlistEditable || model.playlistDraft?.canUndo != true)
+                Button(model.t("playlist.redo")) { model.playlistHistory("playlist_redo") }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.playlistEditable || model.playlistDraft?.canRedo != true)
+            }
         }
     }
 }

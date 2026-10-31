@@ -83,7 +83,7 @@ struct TaskPanel: View {
                 }
                 Spacer(minLength: 4)
                 if model.workspace == .incoming {
-                    Button(t("import.action")) { model.importMusic() }
+                    Button(t(model.playlistSupported ? (model.playlistDraft?.dirty == true ? "playlist.check.combined" : "playlist.check.import") : "import.action")) { model.importMusic() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!model.writable || model.queue.isEmpty || model.queue.count != model.state?.queueCount)
                 } else if model.workspace == .removal {

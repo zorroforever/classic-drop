@@ -13,6 +13,9 @@ final class StringsTests: XCTestCase {
         for (language, label) in [("en", "iPod Library"), ("ja", "iPod ライブラリ"), ("zh-Hans", "iPod 曲库")] {
             strings.language = language
             XCTAssertEqual(strings.text("library"), label, language)
+            for key in ["playlist", "playlist.move", "playlist.check.combined", "playlist.rules.apply", "playlist.operator.between", "playlist.field.rating", "playlist.import.destination", "playlist.reselect"] {
+                XCTAssertNotEqual(strings.text(key), key, language + ": " + key)
+            }
         }
         XCTAssertEqual(strings.text("unknown.test.key"), "unknown.test.key")
     }

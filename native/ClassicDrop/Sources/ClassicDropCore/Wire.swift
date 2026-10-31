@@ -55,6 +55,14 @@ public struct RequestDTO: Encodable {
     public var playlists: [String]?
     public var source: String?
     public var allowHighResolutionAlac: Bool?
+    public var playlistRevision: String?
+    public var playlistEdit: PlaylistEditDTO?
+    public var smart: SmartPlaylistDTO?
+    public var destination: ImportDestinationDTO?
+    public var reuse: [ImportReuseDTO]?
+    public var allowDuplicates: [String]?
+    public var includeImports: Bool?
+    public var batchCount: Int?
     public init(_ command: String, generation: String = "") {
         self.command = command
         self.generation = generation
@@ -152,6 +160,19 @@ public struct ResultDTO: Decodable {
     public let warnings: [String]?
     public let guiApplication: Bool?
     public let audioFormats: [AudioFormatDTO]?
+    public let capabilities: [String]?
+    public let playlistItems: [PlaylistSummaryDTO]?
+    public let playlistEntries: [PlaylistEntryDTO]?
+    public let playlistDraft: PlaylistDraftDTO?
+    public let smartFields: [SmartFieldDTO]?
+    public let playlistReview: PlaylistReviewDTO?
+    public let playlistIdMap: [PlaylistIDMapDTO]?
+    public let destination: ImportDestinationDTO?
+    public let reuse: [ImportReuseDTO]?
+    public let queueNeedsPreparation: Bool?
+    public let queueRequiresReselection: Bool?
+    public let allowDuplicates: [String]?
+    public let batchToken: String?
 }
 
 public struct ProgressDTO: Decodable {

@@ -27,6 +27,10 @@ final class Strings: ObservableObject {
         guard let localization = resources.localizations.first(where: { $0.caseInsensitiveCompare(resolved) == .orderedSame }),
               let path = resources.path(forResource: localization, ofType: "lproj"),
               let bundle = Bundle(path: path) else { return key }
-        return bundle.localizedString(forKey: key, value: key, table: nil)
+        let result = bundle.localizedString(forKey: key, value: key, table: nil)
+        if result == key, ["playlist.field.", "playlist.operator.", "playlist.choice.", "playlist.change.", "playlist.action.", "playlist.subject."].contains(where: key.hasPrefix) {
+            return key.components(separatedBy: ".").last?.replacingOccurrences(of: "_", with: " ").capitalized ?? key
+        }
+        return result
     }
 }

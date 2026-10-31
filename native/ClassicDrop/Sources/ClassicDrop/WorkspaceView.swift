@@ -65,7 +65,21 @@ struct WorkspaceView: View {
             }
         }
         .sheet(item: $model.review) { RemovalReviewView(review: $0) }
-        .sheet(isPresented: Binding(get: { !model.error.isEmpty }, set: { if !$0 { model.error = "" } })) {
+        .sheet(item: $model.playlistEditor) { PlaylistEditor(context: $0) }
+        .sheet(isPresented: Binding(get: { model.playlistReview != nil || model.pendingLifecycle != nil }, set: {
+            if !$0 { model.invalidatePlaylistReview(); model.cancelLifecycle() }
+        })) {
+            if let review = model.playlistReview { PlaylistReviewView(review: review) }
+            else { PlaylistLifecycleView() }
+        }
+        .sheet(item: $model.playlistDelete) { PlaylistDeleteView(item: $0) }
+        .sheet(isPresented: $model.playlistAddSheet) { PlaylistAddTracks() }
+        .sheet(isPresented: $model.playlistTargetSheet) { ImportPlaylistDestination() }
+        .sheet(isPresented: $model.playlistTrackTargets) { PlaylistTrackTargets() }
+        .sheet(isPresented: Binding(get: {
+            !model.error.isEmpty && model.playlistEditor == nil && model.playlistReview == nil && model.playlistDelete == nil &&
+            !model.playlistAddSheet && !model.playlistTargetSheet && !model.playlistTrackTargets && model.pendingLifecycle == nil
+        }, set: { if !$0 { model.error = "" } })) {
             VStack(alignment: .leading, spacing: 18) {
                 Label(t("details"), systemImage: "exclamationmark.triangle").font(.title2)
                 ScrollView { Text(model.error).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
@@ -134,6 +148,7 @@ struct WorkspaceView: View {
                     InspectorView().frame(width: inspectorWidth)
                 }
             }
+            PlaylistDraftBar()
             Divider()
             TaskPanel()
         }
@@ -159,6 +174,7 @@ struct WorkspaceView: View {
             case .incoming: ImportView()
             case .removal: RemovalView()
             case .recovery: RecoveryView()
+            case .playlist: PlaylistView()
             }
         }
     }
@@ -169,15 +185,31 @@ struct SidebarView: View {
     @EnvironmentObject var strings: Strings
     var body: some View {
         VStack(spacing: 0) {
-            List(selection: Binding<Workspace?>(get: { model.workspace }, set: { if let value = $0 { model.workspace = value } })) {
+            List {
                 Section(strings.text("library.section")) {
-                    ForEach(Workspace.allCases) { workspace in
-                        HStack {
+                    ForEach(Workspace.allCases.filter { $0 != .playlist }) { workspace in
+                        Button { model.workspace = workspace } label: { HStack {
                             Label(strings.text(workspace.rawValue), systemImage: workspace.symbol)
                             Spacer()
                             let count = workspace == .incoming ? model.state?.queueCount : workspace == .removal ? model.state?.packageCount : nil
                             if let count, count > 0 { Text(count.formatted()).font(.caption).foregroundStyle(.secondary) }
-                        }.tag(workspace).padding(.vertical, 5)
+                        }.contentShape(Rectangle()).foregroundStyle(model.workspace == workspace ? Color.accentColor : Color.primary) }
+                            .buttonStyle(.plain).padding(.vertical, 5)
+                    }
+                }
+                if model.playlistSupported {
+                    Section {
+                        PlaylistTree()
+                    } header: {
+                        HStack {
+                            Text(strings.text("playlist"))
+                            Spacer()
+                            Menu {
+                                ForEach(["playlist", "smart", "folder"], id: \.self) { kind in
+                                    Button(strings.text("playlist.kind." + kind)) { model.playlistEditor = PlaylistEditorState(kind: kind) }
+                                }
+                            } label: { Image(systemName: "plus") }.menuStyle(.borderlessButton).fixedSize().disabled(!model.playlistEditable)
+                        }
                     }
                 }
             }
