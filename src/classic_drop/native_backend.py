@@ -18,6 +18,7 @@ from classic_drop.audio_format import AudioFormat, inspect_audio_format
 from classic_drop.engine import ClassicDropEngine, PreviewEntry, RemovalReview
 from classic_drop.media import decode_cover
 from classic_drop.native_browser import NativeBrowserIndex, build_index
+from classic_drop.native_playlists import ImportDestinationDTO, NativePlaylists
 from classic_drop.native_protocol import (
     AlbumDTO,
     AudioFormatDTO,
@@ -107,6 +108,7 @@ class NativeBackend:
         self.browser: NativeBrowserIndex | None = None
         self.browser_lock = Lock()
         self.audio_formats: dict[int, AudioFormat] = {}
+        self.playlist_adapter = NativePlaylists(self)
 
     def _sync(self) -> None:
         active = self.engine.coordinator.active_ipod
@@ -120,6 +122,7 @@ class NativeBackend:
             self.audio_formats.clear()
             self.package.clear()
             self._invalidate_review()
+            self.playlist_adapter.reset()
 
     def browser_source(self, request: Request) -> tuple[ActiveIPod, str, Result]:
         self._sync()
@@ -179,7 +182,9 @@ class NativeBackend:
             candidate.available_bytes if candidate else 0,
             candidate.total_bytes if candidate else 0,
             len(active.library.tracks) if active else 0,
-            len(self.entries),
+            len(self.playlist_adapter.carryover.intents)
+            if self.playlist_adapter.carryover is not None
+            else len(self.entries),
             len(self.package),
             bool(recovery),
             allowed,
@@ -238,6 +243,12 @@ class NativeBackend:
             count,
             warnings,
             audio_formats=audio_formats,
+            playlist_draft=self.playlist_adapter.draft(),
+            destination=self.playlist_adapter.destination,
+            reuse=self.playlist_adapter.reuse,
+            allow_duplicates=self.playlist_adapter.allow_duplicates,
+            queue_needs_preparation=self.playlist_adapter.carryover is not None,
+            queue_requires_reselection=self.playlist_adapter.requires_reselection,
         )
 
     def execute(self, request: Request, cancelled: Event) -> Result:
@@ -253,6 +264,28 @@ class NativeBackend:
                 self._result(), gui_application=QCoreApplication.instance() is not None
             )
         self.engine._checkpoint(cancelled)
+        if command.startswith("playlist_") or command in {
+            "import_destination",
+            "queue_reprepare",
+        }:
+            return self.playlist_adapter.execute(request, cancelled)
+        if command in {
+            "select",
+            "eject",
+            "restore",
+            "prepare_delete",
+            "delete",
+            "commit",
+        }:
+            self.playlist_adapter.guard()
+        if command == "commit" and (
+            self.playlist_adapter.destination != ImportDestinationDTO()
+            or self.playlist_adapter.reuse
+            or self.playlist_adapter.carryover is not None
+        ):
+            raise ValueError(
+                "Use the reviewed Playlist save for Playlist import choices"
+            )
         if command == "audio_formats":
             current_tracks = {
                 str(t.track_id): t for t in self.engine.active.library.tracks
@@ -327,11 +360,17 @@ class NativeBackend:
             self._invalidate_review()
             return self._result()
         if command == "discard":
+            self.playlist_adapter.discard_queue()
             self.engine.discard()
             self.entries.clear()
             self.revision = uuid4().hex
+            self.playlist_adapter.queue_changed()
             return self._result()
         if command == "preview":
+            if self.playlist_adapter.carryover is not None:
+                raise ValueError(
+                    "Prepare the retained Host queue again before adding files"
+                )
             paths = tuple(e.path for e in self.entries.values()) + tuple(
                 Path(p) for p in request.paths
             )
@@ -341,8 +380,11 @@ class NativeBackend:
                 allow_high_resolution_alac=request.allow_high_resolution_alac,
             )
             old = self.entries
+            self.playlist_adapter.carryover = None
+            self.playlist_adapter.queue_source = self.engine.active
             self.entries = {e.token: old.get(e.token, e) for e in entries}
             self.revision = uuid4().hex
+            self.playlist_adapter.queue_changed()
             return self._preview_page(request)
         if command == "queue":
             return self._preview_page(request)
@@ -350,6 +392,7 @@ class NativeBackend:
             self._apply_edits(request)
             if command == "edit":
                 self.revision = uuid4().hex
+                self.playlist_adapter.queue_changed()
                 return self._result()
             if request.ids and set(request.ids) != set(self.entries):
                 raise ValueError("The preview set expired; reload")
@@ -376,6 +419,7 @@ class NativeBackend:
             for token in request.ids:
                 self.entries[token] = replace(self.entries[token], artwork=pixels)
             self.revision = uuid4().hex
+            self.playlist_adapter.queue_changed()
             return self._result()
         if command == "preview_artwork":
             entry = self.entries.get(request.token)
@@ -487,7 +531,11 @@ class NativeBackend:
             entry = updated[token]
             if edit.selected and (
                 entry.status == "error"
-                or (entry.status != "new" and not edit.allow_duplicate)
+                or (
+                    entry.status != "new"
+                    and not edit.allow_duplicate
+                    and token not in {i.token for i in self.playlist_adapter.reuse}
+                )
             ):
                 raise ValueError("Explicit duplicate override is required")
             updated[token] = replace(
@@ -501,9 +549,21 @@ class NativeBackend:
                 selected=edit.selected,
             )
         self.entries = updated
+        self.playlist_adapter.allow_duplicates = tuple(
+            sorted(
+                (set(self.playlist_adapter.allow_duplicates) - edits.keys())
+                | {e.token for e in edits.values() if e.allow_duplicate}
+            )
+        )
+        self.playlist_adapter.queue_changed()
 
     def _preview_page(self, request: Request) -> Result:
-        entries = tuple(self.entries.values())
+        carryover = self.playlist_adapter.carryover
+        entries = (
+            tuple(intent.entry for intent in carryover.intents)
+            if carryover is not None
+            else tuple(self.entries.values())
+        )
         return self._result(
             preview=tuple(
                 preview_dto(e)
