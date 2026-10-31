@@ -143,6 +143,8 @@
 "audio.loading" = "Reading audio format…";
 "audio.unknown" = "Unknown";
 "audio.unavailable" = "Audio format could not be read";
+"audio.read" = "Read audio formats";
+"audio.disabled" = "Audio format reading is off. Enable it in the More menu.";
 
 "alac.original" = "Import ALAC without conversion";
 "alac.original.on" = "Keep the original ALAC bit depth and sample rate. Playback support depends on your iPod; other formats follow the usual rules.";

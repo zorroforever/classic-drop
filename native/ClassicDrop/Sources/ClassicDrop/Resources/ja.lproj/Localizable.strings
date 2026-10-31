@@ -143,6 +143,8 @@
 "audio.loading" = "音声形式を読み取り中…";
 "audio.unknown" = "不明";
 "audio.unavailable" = "音声形式を読み取れませんでした";
+"audio.read" = "音声形式を読み取る";
+"audio.disabled" = "音声形式の読み取りはオフです。その他メニューで有効にできます。";
 
 "alac.original" = "ALAC を変換せずに読み込む";
 "alac.original.on" = "ALAC の元のビット深度とサンプルレートを保持します。再生対応は iPod で確認してください。他の形式は通常のルールに従います。";

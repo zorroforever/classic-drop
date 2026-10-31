@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published var cancelRequested = false
     @Published var error = ""
     @Published var audioFormats: [String: AudioFormatDTO] = [:]
+    @Published private(set) var audioFormatReadingEnabled = false
     @Published var images: [String: NSImage] = [:]
     @Published var query = ""
     @Published var albumMode = true
@@ -80,6 +81,7 @@ final class AppModel: ObservableObject {
     private var audioPending: [String] = []
     private var audioRequested = Set<String>()
     private var audioRequestID: String?
+    private var ignoredAudioRequestID: String?
     private var browserEpoch = 0
     private var albumLoad = 0
     private var trackLoad = 0
@@ -98,6 +100,9 @@ final class AppModel: ObservableObject {
     init(client: any HelperConnection = HelperClient()) { self.client = client }
     var busy: Bool { task?.running == true }
     var connected: Bool { !(state?.activeId.isEmpty ?? true) }
+    var inspectorEligible: Bool {
+        openAlbum == nil && [.library, .incoming].contains(workspace)
+    }
     var writable: Bool { ready && connected && state?.writesAllowed == true && !busy && !unknownWrite }
     var t: (String) -> String { strings.text }
 
@@ -154,6 +159,8 @@ final class AppModel: ObservableObject {
         }
         guard let operation = pending.removeValue(forKey: envelope.id) else { return }
         if envelope.id == audioRequestID { audioRequestID = nil }
+        let ignoredAudio = envelope.id == ignoredAudioRequestID
+        if ignoredAudio { ignoredAudioRequestID = nil }
         let artwork = ["artwork", "preview_artwork"].contains(operation.command)
         if artwork, let token = operation.token {
             let key = operation.command == "preview_artwork" ? "preview:\(token)" : token
@@ -163,7 +170,7 @@ final class AppModel: ObservableObject {
             if artwork { dispatchArtwork() }
             dispatchAudioFormats()
         }
-        guard operation.epoch == browserEpoch else { return }
+        guard !ignoredAudio, operation.epoch == browserEpoch else { return }
         let stateCommand = ["hello", "discover", "select", "commit", "delete", "restore", "eject"].contains(operation.command)
         if !stateCommand, let result = envelope.result, result.state.generation != state?.generation { return }
         if let result = envelope.result { apply(result.state) }
@@ -248,6 +255,7 @@ final class AppModel: ObservableObject {
         clearBrowser()
         artworkInFlight = []
         audioRequestID = nil
+        ignoredAudioRequestID = nil
         state = nil; queue = []; edits = [:]
         alacOriginalImport = false
         error = t(unknownWrite ? "write.unknown" : "helper.stopped") + " (\(status))"
@@ -429,6 +437,24 @@ final class AppModel: ObservableObject {
         allTracks.filter { $0.albumId == album.id }.map(\.id)
     }
 
+    var audioFormatPlaceholder: String { audioFormatReadingEnabled ? "…" : "—" }
+
+    func setAudioFormatReadingEnabled(_ enabled: Bool) {
+        guard !closing, enabled != audioFormatReadingEnabled else { return }
+        audioFormatReadingEnabled = enabled
+        if enabled {
+            audioPending = audioDemand.keys.sorted().filter { audioFormats[$0] == nil && !audioRequested.contains($0) }
+            dispatchAudioFormats()
+        } else {
+            audioPending = []; audioRequested = []
+            if let id = audioRequestID {
+                ignoredAudioRequestID = id
+                var cancel = RequestDTO("cancel"); cancel.token = id
+                try? client.send(cancel)
+            }
+        }
+    }
+
     func acquireAudioFormats(_ ids: [String]) {
         for id in ids {
             audioDemand[id, default: 0] += 1
@@ -448,7 +474,7 @@ final class AppModel: ObservableObject {
     }
 
     private func dispatchAudioFormats() {
-        guard ready, connected, browserReady, !busy, !closing, audioRequestID == nil else { return }
+        guard audioFormatReadingEnabled, ready, connected, browserReady, !busy, !closing, audioRequestID == nil else { return }
         audioPending.removeAll { audioDemand[$0] == nil || audioFormats[$0] != nil || audioRequested.contains($0) }
         let ids = Array(audioPending.prefix(8))
         guard !ids.isEmpty else { return }

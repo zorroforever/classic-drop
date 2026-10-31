@@ -2,6 +2,19 @@ import SwiftUI
 import AppKit
 import ClassicDropCore
 
+enum InspectorLayout {
+    static let minimumDetailWidth: CGFloat = 320
+    static let preferredDetailWidth: CGFloat = 640
+    static let minimumInspectorWidth: CGFloat = 300
+    static let idealInspectorWidth: CGFloat = 340
+    static let maximumInspectorWidth: CGFloat = 360
+    static let maximumSidebarWidth: CGFloat = 250
+
+    static func detailColumnWidth(availableWidth: CGFloat) -> CGFloat {
+        min(preferredDetailWidth, max(minimumDetailWidth, availableWidth - maximumSidebarWidth - maximumInspectorWidth - 2))
+    }
+}
+
 struct WorkspaceView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
@@ -10,40 +23,17 @@ struct WorkspaceView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            HSplitView {
-                if sidebar { SidebarView().frame(minWidth: 180, idealWidth: 210, maxWidth: 250) }
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        if model.inspector && model.openAlbum == nil && [.library, .incoming].contains(model.workspace) {
-                            Divider()
-                            InspectorView().frame(width: geometry.size.width < 1100 ? 235 : 270)
-                        }
-                    }
-                    Divider()
-                    TaskPanel()
-                }
-                .frame(minWidth: 660)
-                .background(Color(nsColor: .textBackgroundColor))
-            }
-            .onAppear { if geometry.size.width < 1100 { model.inspector = false } }
+            workspaceShell(for: geometry)
         }
         .frame(minWidth: 940, minHeight: 580)
         .background(WindowSetup())
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button { sidebar.toggle() } label: { Image(systemName: "sidebar.left") }
+                Button { sidebar.toggle() } label: { Image(systemName: sidebar ? "sidebar.left" : "sidebar.right") }
                     .help(t("library.section"))
             }
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 14) {
-                    Text(t(model.workspace.rawValue)).font(.headline)
-                    if model.workspace == .library {
-                        TextField(t("search"), text: $model.query)
-                            .textFieldStyle(.roundedBorder).frame(minWidth: 170, idealWidth: 260, maxWidth: 340)
-                            .onChange(of: model.query) { _ in model.searchChanged() }
-                    }
-                }
+                Text(t(model.workspace.rawValue)).font(.headline)
             }
             ToolbarItemGroup(placement: .automatic) {
                 if model.workspace == .library {
@@ -63,13 +53,12 @@ struct WorkspaceView: View {
                 .disabled(!model.writable)
                 Menu {
                     Button(t("refresh")) { model.discover() }.disabled(model.busy)
-                    Menu(t("language")) {
-                        Picker(t("language"), selection: $strings.language) {
-                            Text(t("system")).tag("system")
-                            Text("简体中文").tag("zh-Hans")
-                            Text("English").tag("en")
-                            Text("日本語").tag("ja")
-                        }
+                    Toggle(t("audio.read"), isOn: Binding(get: { model.audioFormatReadingEnabled }, set: { model.setAudioFormatReadingEnabled($0) }))
+                    Picker(t("language"), selection: $strings.language) {
+                        Text(t("system")).tag("system")
+                        Text("简体中文").tag("zh-Hans")
+                        Text("English").tag("en")
+                        Text("日本語").tag("ja")
                     }
                     if !model.ready { Button(t("restart")) { model.restart() } }
                 } label: { Image(systemName: "ellipsis") }
@@ -83,6 +72,80 @@ struct WorkspaceView: View {
                 HStack { Spacer(); Button(t("close")) { model.error = "" }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 580, height: 330)
         }
+    }
+
+    @ViewBuilder
+    private func workspaceShell(for geometry: GeometryProxy) -> some View {
+        let navigation = navigationContainer(for: geometry)
+        if model.workspace == .library {
+            navigation
+                .searchable(text: $model.query, prompt: Text(t("search")))
+                .onChange(of: model.query) { _ in model.searchChanged() }
+        } else {
+            navigation
+        }
+    }
+
+    @ViewBuilder
+    private func navigationContainer(for geometry: GeometryProxy) -> some View {
+        if #available(macOS 14.0, *), model.inspectorEligible {
+            NavigationSplitView(columnVisibility: systemColumnVisibility) {
+                SidebarView().navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
+            } detail: {
+                detailColumn(
+                    manualInspector: false,
+                    inspectorWidth: InspectorLayout.idealInspectorWidth,
+                    minimumWidth: InspectorLayout.minimumDetailWidth
+                )
+                .navigationSplitViewColumnWidth(
+                    InspectorLayout.detailColumnWidth(availableWidth: geometry.size.width)
+                )
+            }
+            .navigationSplitViewStyle(.balanced)
+            .inspector(isPresented: $model.inspector) {
+                InspectorView()
+                    .inspectorColumnWidth(
+                        min: InspectorLayout.minimumInspectorWidth,
+                        ideal: InspectorLayout.idealInspectorWidth,
+                        max: InspectorLayout.maximumInspectorWidth
+                    )
+            }
+        } else if #available(macOS 13.0, *) {
+            NavigationSplitView(columnVisibility: systemColumnVisibility) {
+                SidebarView().navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
+            } detail: {
+                detailColumn(manualInspector: true, inspectorWidth: geometry.size.width < 1100 ? 235 : 270)
+            }
+            .navigationSplitViewStyle(.balanced)
+        } else {
+            HSplitView {
+                if sidebar { SidebarView().frame(minWidth: 180, idealWidth: 210, maxWidth: 250) }
+                detailColumn(manualInspector: true, inspectorWidth: geometry.size.width < 1100 ? 235 : 270)
+            }
+        }
+    }
+
+    private func detailColumn(manualInspector: Bool, inspectorWidth: CGFloat, minimumWidth: CGFloat = 660) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                if manualInspector && model.inspector && model.inspectorEligible {
+                    Divider()
+                    InspectorView().frame(width: inspectorWidth)
+                }
+            }
+            Divider()
+            TaskPanel()
+        }
+        .frame(minWidth: minimumWidth)
+    }
+
+    @available(macOS 13.0, *)
+    private var systemColumnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { sidebar ? .all : .detailOnly },
+            set: { sidebar = $0 != .detailOnly }
+        )
     }
 
     @ViewBuilder private var content: some View {

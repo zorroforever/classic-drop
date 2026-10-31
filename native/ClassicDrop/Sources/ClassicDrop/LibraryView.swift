@@ -25,10 +25,9 @@ struct LibraryView: View {
         }
         .overlay {
             if model.browserPreparing {
-                VStack(spacing: 10) {
-                    ProgressView()
-                    Text(t("browser.preparing")).font(.headline)
-                }.padding(24).modifier(NavigationMaterial())
+                ProgressView(t("browser.preparing"))
+                    .controlSize(.large)
+                    .padding(20)
             }
         }
     }
@@ -117,10 +116,10 @@ struct TrackTable: View {
                     TrackCodecCell(trackID: track.id, model: model, strings: strings)
                 }.width(min: 55, ideal: 65)
                 TableColumn(strings.text("audio.bit_depth")) { track in
-                    Text(model.audioFormats[track.id]?.bitDepthText ?? "…").monospacedDigit()
+                    Text(model.audioFormats[track.id]?.bitDepthText ?? model.audioFormatPlaceholder).monospacedDigit()
                 }.width(min: 55, ideal: 65)
                 TableColumn(strings.text("audio.sample_rate")) { track in
-                    Text(model.audioFormats[track.id]?.sampleRateText ?? "…").monospacedDigit()
+                    Text(model.audioFormats[track.id]?.sampleRateText ?? model.audioFormatPlaceholder).monospacedDigit()
                 }.width(min: 70, ideal: 85)
                 TableColumn(strings.text("source"), value: \.source).width(min: 100, ideal: 160)
             }
@@ -134,10 +133,10 @@ struct TrackTable: View {
                     TrackCodecCell(trackID: track.id, model: model, strings: strings)
                 }.width(min: 55, ideal: 65)
                 TableColumn(strings.text("audio.bit_depth")) { track in
-                    Text(model.audioFormats[track.id]?.bitDepthText ?? "…").monospacedDigit()
+                    Text(model.audioFormats[track.id]?.bitDepthText ?? model.audioFormatPlaceholder).monospacedDigit()
                 }.width(min: 55, ideal: 65)
                 TableColumn(strings.text("audio.sample_rate")) { track in
-                    Text(model.audioFormats[track.id]?.sampleRateText ?? "…").monospacedDigit()
+                    Text(model.audioFormats[track.id]?.sampleRateText ?? model.audioFormatPlaceholder).monospacedDigit()
                 }.width(min: 70, ideal: 85)
             TableColumn(strings.text("duration"), value: \.duration).width(55)
             }
@@ -153,8 +152,8 @@ struct TrackCodecCell: View {
     @ObservedObject var strings: Strings
     var body: some View {
         let generation = model.state?.generation
-        Text(model.audioFormats[trackID]?.codecText ?? "…")
-            .help(model.audioFormats[trackID]?.detail.isEmpty == false ? strings.text("audio.unavailable") : strings.text("audio.codec"))
+        Text(model.audioFormats[trackID]?.codecText ?? model.audioFormatPlaceholder)
+            .help(!model.audioFormatReadingEnabled ? strings.text("audio.disabled") : model.audioFormats[trackID]?.detail.isEmpty == false ? strings.text("audio.unavailable") : strings.text("audio.codec"))
             .onAppear { model.acquireAudioFormats([trackID]) }
             .onDisappear { if generation == model.state?.generation { model.releaseAudioFormats([trackID]) } }
             .id([generation ?? "", trackID])
@@ -166,14 +165,16 @@ struct AlbumAudioSummary: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
     var body: some View {
-        let ids = model.audioTrackIDs(for: album)
-        let generation = model.state?.generation
-        let summary = audioFormatSummary(ids: ids, formats: model.audioFormats, unknown: strings.text("audio.unknown"))
-        Text(summary ?? strings.text("audio.loading"))
-            .font(.caption).foregroundStyle(.secondary).lineLimit(3)
-            .help(summary ?? strings.text("audio.loading"))
-            .onAppear { model.acquireAudioFormats(ids) }
-            .onDisappear { if generation == model.state?.generation { model.releaseAudioFormats(ids) } }
-            .id([generation ?? "", album.id] + ids)
+        if model.audioFormatReadingEnabled {
+            let ids = model.audioTrackIDs(for: album)
+            let generation = model.state?.generation
+            let summary = audioFormatSummary(ids: ids, formats: model.audioFormats, unknown: strings.text("audio.unknown"))
+            Text(summary ?? strings.text("audio.loading"))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                .help(summary ?? strings.text("audio.loading"))
+                .onAppear { model.acquireAudioFormats(ids) }
+                .onDisappear { if generation == model.state?.generation { model.releaseAudioFormats(ids) } }
+                .id([generation ?? "", album.id] + ids)
+        }
     }
 }

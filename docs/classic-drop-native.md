@@ -2,8 +2,14 @@
 
 The native build implements the approved SwiftUI layout: an album grid and detail
 page, Track list, editable import preview, removal filters/package/Review, recovery,
-collapsible inspector and a task area shared by all workspaces. The retained Qt
-entry remains available for comparison. Do not run both against one iPod.
+collapsible inspector and a task area shared by all workspaces. Navigation uses
+`NavigationSplitView` on macOS 13 and newer and the system Inspector on macOS 14
+and newer. macOS 12 retains the split-view compatibility layout; macOS 13 keeps an
+Inspector column inside the system split view. The Library search uses the native
+search toolbar. Track/import details and recovery use Forms; task progress uses a
+system GroupBox. The album grid and dense Library/removal Tables remain content
+views. The retained Qt entry remains available for comparison. Do not run both
+against one iPod.
 
 ## Build
 
@@ -134,6 +140,13 @@ this native bundle explicitly when testing the Liquid Glass interface.
 
 ## Actual audio format display
 
+Audio format reading starts **off on each launch**. Enable **Read audio formats**
+in the top-right **More** menu when needed. While off, browsing does not inspect
+audio headers, unloaded table cells show “—”, and Album summaries are hidden.
+Turning it off drops unsent reads and cancels an outstanding read at safe
+checkpoints; a late reply cannot restart scanning. Previously cached values remain
+available within the current Library generation.
+
 The Track list and Album detail table show codec, bit depth and sample rate.
 Album cards summarize all members of the Album, including members hidden by search;
 different values are listed separately. A partially observed Album shows a loading
@@ -141,7 +154,7 @@ label, and unreadable members remain explicitly unknown. AAC and MP3 bit depth i
 not applicable and displays “—”; MP4 sample-size placeholders are not treated as
 lossless precision.
 
-Visible rows and Album summaries request actual encoded headers on demand through
+While enabled, visible rows and Album summaries request actual encoded headers on demand through
 identity-bound Playback Sources. The serial engine worker handles at most eight
 unique Track IDs per request, with one physical format request outstanding in the
 native shell. Each file has a 1 MiB read budget, 64 KiB maximum physical reads and
@@ -149,6 +162,11 @@ an operation limit; large media payloads and metadata padding are skipped. Resul
 including unreadable files, are cached only for the current Library generation.
 Leaving a view drops unsent work; stale replies cannot populate a new generation.
 The pure metadata index does not read media files.
+
+Artwork is also loaded on demand, with up to 128 decoded images cached in memory
+for the current Library generation. It is not preloaded at launch or persisted
+across launches. Artwork and audio-header requests share the serial engine worker;
+leaving audio reading off avoids that extra device work while browsing covers.
 
 This display observes existing files, including high-resolution ALAC, without
 applying import compatibility rules. It neither changes import/transcoding policy

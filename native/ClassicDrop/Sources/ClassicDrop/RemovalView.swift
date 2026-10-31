@@ -119,25 +119,33 @@ struct RecoveryView: View {
     @State private var keepState: StateDTO?
     private func t(_ key: String) -> String { strings.text(key) }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                Label(t("recovery"), systemImage: "clock.arrow.circlepath").font(.title2.bold())
+        Form {
+            Section {
                 Text(t("recovery.hint")).foregroundStyle(.secondary)
-                if model.state?.canRestore == true {
-                    Divider()
+            } header: {
+                Label(t("recovery"), systemImage: "clock.arrow.circlepath")
+            }
+            if model.state?.canRestore == true {
+                Section {
                     if model.state?.writesAllowed == false { Text(t("recovery.blocked")).font(.headline) }
-                    Text(t("recovery.location")).font(.caption).foregroundStyle(.secondary)
-                    Text(model.state?.recoveryPath ?? "").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Text(model.state?.recoveryPath ?? "")
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
                     Button(t("restore")) { model.restore() }.disabled(!model.ready || model.busy)
                     if model.state?.canKeepContents == true {
                         Button(t("keep")) {
                             keepState = model.state; confirmingKeep = true
                         }.disabled(!model.ready || model.busy)
                     }
-                } else {
-                    Label(t("recovery.none"), systemImage: "checkmark.circle").padding(.vertical, 24).foregroundStyle(.secondary)
+                } header: {
+                    Text(t("recovery.location"))
                 }
-            }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Section {
+                    Label(t("recovery.none"), systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .alert(t("keep"), isPresented: $confirmingKeep) {
             Button(t("cancel"), role: .cancel) {}

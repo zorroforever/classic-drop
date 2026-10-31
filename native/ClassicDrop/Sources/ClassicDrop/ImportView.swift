@@ -76,69 +76,95 @@ struct InspectorView: View {
     @EnvironmentObject var strings: Strings
     private func t(_ key: String) -> String { strings.text(key) }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(t("inspector")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                if model.workspace == .incoming, let token = model.selectedQueue,
-                   let entry = model.queue.first(where: { $0.token == token }) {
-                    preview(entry)
-                } else if let track = (model.tracks + model.albumTracks).first(where: { model.selectedTracks.contains($0.id) }) {
-                    CoverView(id: track.artworkId)
-                    Text(track.title).font(.title2.bold()).textSelection(.enabled)
-                    Text(track.artist).foregroundStyle(.secondary)
-                    Divider()
+        Form {
+            if model.workspace == .incoming, let token = model.selectedQueue,
+               let entry = model.queue.first(where: { $0.token == token }) {
+                preview(entry)
+            } else if let track = (model.tracks + model.albumTracks).first(where: { model.selectedTracks.contains($0.id) }) {
+                Section {
+                    identity(artworkID: track.artworkId, title: track.title, artist: track.artist)
+                }
+                Section {
                     info("album", track.album); info("year", track.year > 0 ? "\(track.year)" : "—")
                     info("duration", track.duration); info("genre", track.genre)
                     HStack { Text(t("audio.codec")).foregroundStyle(.secondary); Spacer(); TrackCodecCell(trackID: track.id, model: model, strings: strings) }.font(.callout)
-                    info("audio.bit_depth", model.audioFormats[track.id]?.bitDepthText ?? "…")
-                    info("audio.sample_rate", model.audioFormats[track.id]?.sampleRateText ?? "…")
-                } else if let album = model.selectedAlbum {
-                    CoverView(id: album.artworkId)
-                    Text(album.title.isEmpty ? t("album.unknown") : album.title).font(.title2.bold())
-                    Text(album.artist).foregroundStyle(.secondary)
-                    Divider()
+                    info("audio.bit_depth", model.audioFormats[track.id]?.bitDepthText ?? model.audioFormatPlaceholder)
+                    info("audio.sample_rate", model.audioFormats[track.id]?.sampleRateText ?? model.audioFormatPlaceholder)
+                } header: {
+                    Text(t("details"))
+                }
+            } else if let album = model.selectedAlbum {
+                Section {
+                    identity(artworkID: album.artworkId, title: album.title.isEmpty ? t("album.unknown") : album.title, artist: album.artist)
+                }
+                Section {
                     info("year", album.year > 0 ? "\(album.year)" : "—")
                     info("songs", "\(album.trackCount)"); info("duration", album.duration)
                     AlbumAudioSummary(album: album)
                     Button(t("album.open")) { model.open(album) }.frame(maxWidth: .infinity)
-                } else {
-                    Image(systemName: "info.circle").font(.largeTitle).foregroundStyle(.tertiary).padding(.top, 50)
-                    Text(t("inspector.empty")).foregroundStyle(.secondary)
+                } header: {
+                    Text(t("details"))
                 }
-            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(Color(nsColor: .windowBackgroundColor).opacity(0.35))
+            } else {
+                Section {
+                    Label(t("inspector.empty"), systemImage: "info.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
+    private func identity(artworkID: String, title: String, artist: String) -> some View {
+        VStack(alignment: .center, spacing: 10) {
+            CoverView(id: artworkID).frame(maxWidth: 260)
+            Text(title).font(.title2.bold()).textSelection(.enabled)
+                .multilineTextAlignment(.center).frame(maxWidth: .infinity)
+            Text(artist).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private func info(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top) { Text(t(label)).foregroundStyle(.secondary); Spacer(); Text(value).multilineTextAlignment(.trailing).textSelection(.enabled) }.font(.callout)
     }
     private func preview(_ entry: PreviewDTO) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            CoverView(id: entry.token, preview: true)
-            ForEach(["title", "artist", "album", "album.artist"], id: \.self) { key in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(t(key)).font(.caption).foregroundStyle(.secondary)
-                    TextField(t(key), text: textBinding(entry, key: key)).textFieldStyle(.roundedBorder)
+        Group {
+            Section {
+                CoverView(id: entry.token, preview: true).frame(maxWidth: .infinity)
+            }
+            Section {
+                ForEach(["title", "artist", "album", "album.artist"], id: \.self) { key in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(t(key)).font(.caption).foregroundStyle(.secondary)
+                        TextField(t(key), text: textBinding(entry, key: key)).textFieldStyle(.roundedBorder)
+                    }
                 }
+                HStack {
+                    numberField(entry, disc: true)
+                    numberField(entry, disc: false)
+                }
+                HStack {
+                    Button(t("cover.replace")) { model.cover(clear: false) }
+                    Button { model.cover(clear: true) } label: { Image(systemName: "trash") }.help(t("cover.clear"))
+                }
+            } header: {
+                Text(t("details"))
             }
-            HStack {
-                numberField(entry, disc: true)
-                numberField(entry, disc: false)
+            Section {
+                Text(t(entry.status)).font(.headline)
+                if entry.status != "new" && entry.status != "error" {
+                    Text(t("duplicate.hint")).font(.caption).foregroundStyle(.secondary)
+                    Toggle(t("duplicate.override"), isOn: Binding(get: { model.edits[entry.token]?.allowDuplicate ?? false }, set: { value in
+                        model.edit(entry.token) { $0.allowDuplicate = value; $0.selected = value }
+                    })).font(.callout)
+                }
+                Text(entry.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(entry.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4).truncationMode(.middle)
+            } header: {
+                Text(t("status"))
             }
-            HStack {
-                Button(t("cover.replace")) { model.cover(clear: false) }
-                Button { model.cover(clear: true) } label: { Image(systemName: "trash") }.help(t("cover.clear"))
-            }
-            Divider()
-            Text(t(entry.status)).font(.headline)
-            if entry.status != "new" && entry.status != "error" {
-                Text(t("duplicate.hint")).font(.caption).foregroundStyle(.secondary)
-                Toggle(t("duplicate.override"), isOn: Binding(get: { model.edits[entry.token]?.allowDuplicate ?? false }, set: { value in
-                    model.edit(entry.token) { $0.allowDuplicate = value; $0.selected = value }
-                })).font(.callout)
-            }
-            Text(entry.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            Text(entry.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4).truncationMode(.middle)
-        }.disabled(model.busy || entry.status == "error")
+        }
+        .disabled(model.busy || entry.status == "error")
     }
     private func textBinding(_ entry: PreviewDTO, key: String) -> Binding<String> {
         let value = model.edits[entry.token] ?? EditDTO(entry)

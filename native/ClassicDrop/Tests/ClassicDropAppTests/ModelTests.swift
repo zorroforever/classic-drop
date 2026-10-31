@@ -30,6 +30,33 @@ final class StubConnection: HelperConnection {
 }
 
 final class ModelTests: XCTestCase {
+    func testInspectorDetailWidthLeavesRoomForSystemInspector() {
+        for width: CGFloat in [940, 1180, 1440] {
+            let detail = InspectorLayout.detailColumnWidth(availableWidth: width)
+            XCTAssertLessThanOrEqual(detail + 250 + 360 + 2, width)
+        }
+    }
+
+    @MainActor
+    func testInspectorEligibilityTracksWorkspaceAndAlbumDetail() throws {
+        let (model, _) = try connected()
+
+        XCTAssertTrue(model.inspectorEligible)
+        model.workspace = .incoming
+        XCTAssertTrue(model.inspectorEligible)
+        model.workspace = .removal
+        XCTAssertFalse(model.inspectorEligible)
+        model.workspace = .recovery
+        XCTAssertFalse(model.inspectorEligible)
+
+        model.workspace = .library
+        model.openAlbum = try Wire.decoder.decode(
+            AlbumDTO.self,
+            from: Data(#"{"id":"album","title":"Album","artist":"Artist","year":2020,"track_count":1,"duration_ms":1000,"artwork_id":"1"}"#.utf8)
+        )
+        XCTAssertFalse(model.inspectorEligible)
+    }
+
     @MainActor
     func testKeepingCurrentContentsBindsRecoveryAndPreservesPackageForReview() throws {
         let (model, connection) = try connected()
@@ -69,8 +96,53 @@ final class ModelTests: XCTestCase {
     }
 
     @MainActor
+    func testAudioFormatsAreOffByDefaultAndEnableExistingVisibleDemand() throws {
+        let (model, connection) = try connected()
+        XCTAssertFalse(model.audioFormatReadingEnabled)
+        model.acquireAudioFormats(["visible", "hidden"])
+        model.releaseAudioFormats(["hidden"])
+        XCTAssertFalse(connection.requests.contains { $0.command == "audio_formats" })
+        model.artwork("cover")
+        XCTAssertEqual(connection.requests.last?.command, "artwork")
+
+        model.setAudioFormatReadingEnabled(true)
+
+        XCTAssertEqual(connection.requests.last { $0.command == "audio_formats" }?.ids, ["visible"])
+    }
+
+    @MainActor
+    func testDisablingAudioReadingCancelsAndIgnoresReplyBeforeResuming() throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.acquireAudioFormats(["first"])
+        let active = try XCTUnwrap(connection.requests.last { $0.command == "audio_formats" })
+        model.acquireAudioFormats(["next"])
+        model.setAudioFormatReadingEnabled(false)
+        XCTAssertEqual(connection.requests.last?.command, "cancel")
+        XCTAssertEqual(connection.requests.last?.token, active.id)
+        model.setAudioFormatReadingEnabled(true)
+        XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, 1)
+
+        try connection.reply("audio_formats", extra: #", "audio_formats":[{"id":"first","codec":"ALAC","bit_depth":24,"sample_rate_hz":96000,"detail":""}]"#)
+
+        XCTAssertNil(model.audioFormats["first"])
+        XCTAssertEqual(Set(connection.requests.last { $0.command == "audio_formats" }?.ids ?? []), ["first", "next"])
+        model.setAudioFormatReadingEnabled(false)
+        let count = connection.requests.filter { $0.command == "audio_formats" }.count
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "audio_formats" })
+        let error = """
+        {"version":1,"id":"\(request.id)","event":"error","generation":"g","sequence":1,"code":"cancelled","detail":"Canceled"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(error.utf8)))
+        XCTAssertTrue(model.audioFormats.isEmpty)
+        XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, count)
+        XCTAssertTrue(model.error.isEmpty)
+    }
+
+    @MainActor
     func testAudioDemandIsBoundedCachesAndPreservesSelection() throws {
         let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
         model.selectedTracks = ["chosen"]
         model.acquireAudioFormats((1...20).map(String.init))
         XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, 1)
@@ -89,6 +161,7 @@ final class ModelTests: XCTestCase {
     @MainActor
     func testOldAudioReplyReleasesPhysicalSlotWithoutPublishing() throws {
         let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
         model.acquireAudioFormats(["1"])
         model.select("new-device")
         try connection.reply("select", generation: "g2")
@@ -105,6 +178,7 @@ final class ModelTests: XCTestCase {
     @MainActor
     func testAudioFailureFreesSlotAndUnknownDoesNotRetry() throws {
         let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
         model.acquireAudioFormats(["1"])
         model.acquireAudioFormats(["2"])
         let failed = try XCTUnwrap(connection.requests.last { $0.command == "audio_formats" })
@@ -124,6 +198,7 @@ final class ModelTests: XCTestCase {
     @MainActor
     func testAudioDemandWaitsForForegroundWorkThenResumes() throws {
         let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
         model.perform("validate", foreground: true)
         let count = connection.requests.count
         model.acquireAudioFormats(["1", "2"])
@@ -136,6 +211,7 @@ final class ModelTests: XCTestCase {
     @MainActor
     func testReusedInspectorCellTransfersDemandToNewTrack() async throws {
         let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
         model.perform("validate", foreground: true)
         let target = InspectorTarget()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 80), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -153,6 +229,7 @@ final class ModelTests: XCTestCase {
     @MainActor
     func testNativeTableCellInheritsAudioDependencies() async throws {
         let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
         let track = try Wire.decoder.decode(TrackDTO.self, from: Data(#"{"id":"table-track","title":"First","artist":"A","album":"B","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":""}"#.utf8))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
