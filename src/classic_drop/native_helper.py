@@ -20,6 +20,7 @@ from classic_drop.native_backend import NativeBackend
 from classic_drop.native_browser import build_index
 from classic_drop.native_protocol import (
     MAX_MESSAGE,
+    VERSION,
     Envelope,
     ProgressDTO,
     Request,
@@ -264,6 +265,34 @@ class HelperServer:
         self.preparations.append(thread)
         thread.start()
 
+    def _invalid_request_id(self, data: bytes) -> str:
+        """Recover only a valid, fresh envelope ID after strict payload rejection."""
+        if len(data) > MAX_MESSAGE:
+            return ""
+        try:
+            raw = json.loads(data)
+        except (ValueError, TypeError, RecursionError):
+            return ""
+        if (
+            not isinstance(raw, dict)
+            or type(raw.get("version")) is not int
+            or raw["version"] != VERSION
+        ):
+            return ""
+        identity = raw.get("id")
+        if not isinstance(identity, str) or not 1 <= len(identity) <= 16384:
+            return ""
+        try:
+            identity.encode("utf-8")
+        except UnicodeEncodeError:
+            return ""
+        if identity in self.seen or len(self.seen) >= 100000:
+            return ""
+        # Even rejected commands consume their identity: a later frame must not
+        # replay it or finish a different in-flight command with the same ID.
+        self.seen.add(identity)
+        return identity
+
     def run(self, stream: BinaryIO) -> None:
         worker = Thread(target=self.run_worker, name="classic-drop-engine")
         worker.start()
@@ -304,7 +333,12 @@ class HelperServer:
                         request.id, "error", code="busy", detail="Command queue is full"
                     )
             except (ValueError, TypeError) as error:
-                self.emit("", "error", code="invalid_request", detail=str(error))
+                self.emit(
+                    self._invalid_request_id(line),
+                    "error",
+                    code="invalid_request",
+                    detail=str(error),
+                )
                 if len(line) > MAX_MESSAGE:
                     break
         if not closing:
