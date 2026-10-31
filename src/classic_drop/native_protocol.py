@@ -187,6 +187,7 @@ class StateDTO:
     writes_allowed: bool
     recovery_path: str
     can_keep_contents: bool = False
+    artwork_cache_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)

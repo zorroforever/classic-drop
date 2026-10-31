@@ -76,6 +76,10 @@ final class AppModel: ObservableObject {
     private var artworkDemand: [String: Int] = [:]
     private var artworkPending: [String] = []
     private var artworkInFlight = Set<String>()
+    private var speculativeArtwork = Set<String>()
+    private var artworkPrefetchPending: [String] = []
+    private var artworkPrefetchRemaining = Set<String>()
+    private let artworkCache: any ArtworkCaching
     private var imageOrder: [String] = []
     private var audioDemand: [String: Int] = [:]
     private var audioPending: [String] = []
@@ -97,7 +101,10 @@ final class AppModel: ObservableObject {
     private var searchWork: DispatchWorkItem?
     private var monitor: Timer?
     private var unknownWrite = false
-    init(client: any HelperConnection = HelperClient()) { self.client = client }
+    init(client: any HelperConnection = HelperClient(), artworkCache: any ArtworkCaching = ArtworkDiskCache()) {
+        self.client = client
+        self.artworkCache = artworkCache
+    }
     var busy: Bool { task?.running == true }
     var connected: Bool { !(state?.activeId.isEmpty ?? true) }
     var inspectorEligible: Bool {
@@ -141,6 +148,9 @@ final class AppModel: ObservableObject {
         do { try client.send(request) }
         catch {
             pending.removeValue(forKey: request.id)
+            if ["artwork", "preview_artwork"].contains(command), let token = request.token {
+                finishArtwork(command == "preview_artwork" ? "preview:\(token)" : token, epoch: browserEpoch)
+            }
             if command == "audio_formats" {
                 audioRequestID = nil
                 for id in request.ids ?? [] { audioFormats[id] = AudioFormatDTO(id: id, detail: String(describing: error)) }
@@ -162,12 +172,13 @@ final class AppModel: ObservableObject {
         let ignoredAudio = envelope.id == ignoredAudioRequestID
         if ignoredAudio { ignoredAudioRequestID = nil }
         let artwork = ["artwork", "preview_artwork"].contains(operation.command)
-        if artwork, let token = operation.token {
+        if artwork, let token = operation.token,
+           envelope.event == "error" || operation.epoch != browserEpoch {
             let key = operation.command == "preview_artwork" ? "preview:\(token)" : token
-            artworkInFlight.remove("\(operation.epoch):\(key)")
+            finishArtwork(key, epoch: operation.epoch)
         }
         defer {
-            if artwork { dispatchArtwork() }
+            dispatchArtwork()
             dispatchAudioFormats()
         }
         guard !ignoredAudio, operation.epoch == browserEpoch else { return }
@@ -217,6 +228,7 @@ final class AppModel: ObservableObject {
         albums = []; tracks = []; albumTracks = []; matches = []; package = []
         audioFormats = [:]; audioDemand = [:]; audioPending = []; audioRequested = []
         images = [:]; imageOrder = []; requestedArtwork = []; artworkPending = []; artworkDemand = [:]
+        artworkPrefetchPending = []; artworkPrefetchRemaining = []
         selectedTracks = []; selectedMatches = []; selectedPackage = []
         openAlbum = nil; selectedAlbum = nil; review = nil
         albumTotal = 0; trackTotal = 0; detailTotal = 0; matchTotal = 0
@@ -254,6 +266,7 @@ final class AppModel: ObservableObject {
         }
         clearBrowser()
         artworkInFlight = []
+        speculativeArtwork = []
         audioRequestID = nil
         ignoredAudioRequestID = nil
         state = nil; queue = []; edits = [:]
@@ -395,6 +408,11 @@ final class AppModel: ObservableObject {
         browserPreparing = false; browserReady = true
         applyLibraryFilter()
         if task?.command == "prepare_browser" { task = nil }
+        if state?.artworkCacheKey?.isEmpty == false {
+            artworkPrefetchPending = Set(allTracks.map(\.artworkId) + allAlbums.map(\.artworkId))
+                .filter { !$0.isEmpty && $0 != "0" }.sorted()
+            artworkPrefetchRemaining = Set(artworkPrefetchPending)
+        }
         dispatchArtwork(); dispatchAudioFormats()
     }
 
@@ -512,25 +530,91 @@ final class AppModel: ObservableObject {
     func resumeArtwork() { dispatchArtwork() }
 
     private func dispatchArtwork() {
-        guard ready, connected, !busy, !browserPreparing else { return }
-        while artworkInFlight.count < 2, !artworkPending.isEmpty {
-            let key = artworkPending.removeFirst()
-            guard artworkDemand[key] != nil else { requestedArtwork.remove(key); continue }
-            let preview = key.hasPrefix("preview:")
-            let id = preview ? String(key.dropFirst(8)) : key
-            let epoch = browserEpoch
-            artworkInFlight.insert("\(epoch):\(key)")
-            perform(preview ? "preview_artwork" : "artwork", configure: { $0.token = id }) { result in
-                guard epoch == self.browserEpoch else { return }
-                if let text = result.image, let data = Data(base64Encoded: text), let image = NSImage(data: data) {
-                    self.images[key] = image
-                    self.imageOrder.removeAll { $0 == key }; self.imageOrder.append(key)
-                    while self.imageOrder.count > 128 {
-                        let oldest = self.imageOrder.removeFirst()
-                        self.images.removeValue(forKey: oldest); self.requestedArtwork.remove(oldest)
+        guard ready, connected, !busy, !closing, !browserPreparing else { return }
+        while artworkInFlight.count < 2 {
+            let key: String
+            let speculative: Bool
+            if !artworkPending.isEmpty {
+                key = artworkPending.removeFirst()
+                guard artworkDemand[key] != nil else { requestedArtwork.remove(key); continue }
+                speculative = false
+            } else {
+                // Never queue speculative device work behind unresolved visible requests.
+                guard browserReady, artworkInFlight.isEmpty, speculativeArtwork.isEmpty else { return }
+                while let first = artworkPrefetchPending.first, !artworkPrefetchRemaining.contains(first) {
+                    artworkPrefetchPending.removeFirst()
+                }
+                guard !artworkPrefetchPending.isEmpty else { return }
+                key = artworkPrefetchPending.removeFirst()
+                speculative = true
+            }
+            let epoch = browserEpoch, slot = "\(epoch):\(key)"
+            guard !artworkInFlight.contains(slot) else { continue }
+            artworkInFlight.insert(slot)
+            requestedArtwork.insert(key)
+            if speculative { speculativeArtwork.insert(slot) }
+            let namespace = key.hasPrefix("preview:") ? "" : state?.artworkCacheKey ?? ""
+            if namespace.isEmpty {
+                requestArtwork(key, epoch: epoch, namespace: namespace)
+            } else {
+                Task { [weak self, artworkCache] in
+                    let data = await artworkCache.read(namespace: namespace, id: key)
+                    guard let self else { return }
+                    guard self.browserEpoch == epoch, self.connected, !self.closing else {
+                        self.finishArtwork(key, epoch: epoch); self.dispatchArtwork(); return
                     }
+                    if let data {
+                        if self.artworkDemand[key] != nil { self.storeArtwork(data, key: key) }
+                        self.finishArtwork(key, epoch: epoch)
+                    } else if self.busy || (self.artworkDemand[key] == nil && !speculative) {
+                        self.artworkInFlight.remove(slot); self.speculativeArtwork.remove(slot)
+                        self.requestedArtwork.remove(key)
+                        if self.artworkDemand[key] != nil { self.artworkPending.insert(key, at: 0) }
+                        if self.artworkPrefetchRemaining.contains(key) { self.artworkPrefetchPending.insert(key, at: 0) }
+                    } else {
+                        self.requestArtwork(key, epoch: epoch, namespace: namespace)
+                    }
+                    self.dispatchArtwork()
                 }
             }
+        }
+    }
+
+    private func requestArtwork(_ key: String, epoch: Int, namespace: String) {
+        let preview = key.hasPrefix("preview:")
+        let id = preview ? String(key.dropFirst(8)) : key
+        perform(preview ? "preview_artwork" : "artwork", configure: { $0.token = id }) { result in
+            guard epoch == self.browserEpoch else { return }
+            guard let text = result.image, let data = Data(base64Encoded: text), NSImage(data: data) != nil else {
+                self.finishArtwork(key, epoch: epoch); return
+            }
+            if self.artworkDemand[key] != nil { self.storeArtwork(data, key: key) }
+            if namespace.isEmpty {
+                self.finishArtwork(key, epoch: epoch)
+            } else {
+                Task { [weak self, artworkCache = self.artworkCache] in
+                    await artworkCache.write(data, namespace: namespace, id: key)
+                    guard let self else { return }
+                    self.finishArtwork(key, epoch: epoch); self.dispatchArtwork()
+                }
+            }
+        }
+    }
+
+    private func finishArtwork(_ key: String, epoch: Int) {
+        artworkInFlight.remove("\(epoch):\(key)")
+        speculativeArtwork.remove("\(epoch):\(key)")
+        if epoch == browserEpoch { artworkPrefetchRemaining.remove(key) }
+    }
+
+    private func storeArtwork(_ data: Data, key: String) {
+        guard let image = NSImage(data: data) else { return }
+        images[key] = image
+        imageOrder.removeAll { $0 == key }; imageOrder.append(key)
+        while imageOrder.count > 128 {
+            let oldest = imageOrder.first { artworkDemand[$0] == nil } ?? imageOrder[0]
+            imageOrder.removeAll { $0 == oldest }
+            images.removeValue(forKey: oldest); requestedArtwork.remove(oldest)
         }
     }
 

@@ -116,8 +116,10 @@ view changes and returning to the Album grid. The selection count includes hidde
 rows. Add to removal package accepts the Music subset in bounded batches;
 it does not delete files. Disconnect, device switch, canceled preparation and helper
 loss invalidate the cache and selection. A reconnected device builds a fresh cache.
-Artwork demand belongs to visible views, with at most two physical requests and a
-128-image cache; hidden pending work is dropped.
+Visible artwork demand takes priority, with at most two outstanding loads and a
+128-image decoded cache. Once metadata is ready, idle time fills the Host thumbnail
+cache for every distinct Library artwork ID, one speculative request at a time.
+Hidden pending demand is dropped; the independent prefetch queue can still cache it.
 
 Clicking an Album card explicitly replaces the Track selection with all Music
 Tracks in that Album, including Tracks hidden by the current search. Double-click
@@ -163,10 +165,25 @@ including unreadable files, are cached only for the current Library generation.
 Leaving a view drops unsent work; stale replies cannot populate a new generation.
 The pure metadata index does not read media files.
 
-Artwork is also loaded on demand, with up to 128 decoded images cached in memory
-for the current Library generation. It is not preloaded at launch or persisted
-across launches. Artwork and audio-header requests share the serial engine worker;
-leaving audio reading off avoids that extra device work while browsing covers.
+Artwork is loaded on demand first, then remaining Library covers are cached in the
+background. The Host stores validated 320-pixel thumbnails under the macOS user
+cache directory (`ClassicDrop/Artwork-v1`), with a 512 MiB total budget and oldest
+entries removed first. Up to 128 decoded images stay in memory; switching views
+or evicting an image can reload the Host thumbnail without rereading the iPod.
+Background fills do not evict visible decoded covers just to retain hidden covers.
+
+Cache namespaces combine the Volume identity, iTunesDB/ArtworkDB fingerprints,
+thumbnail size and schema version, so unchanged Libraries reuse thumbnails after
+relaunch. Changing either database produces a new namespace. Thumbnail shard edits
+made externally without changing either database are not detected by this key.
+Corrupt or unavailable Host cache files are treated as misses. Host IO and payload
+validation run outside the UI actor. Background device reads pause for foreground
+work; disconnects and Library generation changes discard the old queue and late
+results. First-time uncached covers still require device reads, and Libraries
+larger than the disk budget cannot remain fully cached. See ADR-0185.
+
+Artwork and audio-header requests share the serial engine worker; leaving audio
+reading off avoids that extra device work while browsing covers.
 
 This display observes existing files, including high-resolution ALAC, without
 applying import compatibility rules. It neither changes import/transcoding policy

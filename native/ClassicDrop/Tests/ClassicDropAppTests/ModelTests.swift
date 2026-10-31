@@ -19,13 +19,19 @@ final class StubConnection: HelperConnection {
         packageCount: Int = 0,
         writesAllowed: Bool = true,
         canKeepContents: Bool = false,
-        recoveryPath: String = ""
+        recoveryPath: String = "",
+        artworkCacheKey: String = ""
     ) throws {
         let request = try XCTUnwrap(requests.last { $0.command == command })
         let json = """
         {"version":1,"id":"\(request.id)","event":"result","generation":"\(generation)","sequence":1,"code":"","detail":"","result":{"state":{"generation":"\(generation)","revision":"\(revision)","active_id":"device","active_name":"Synthetic iPod","available_bytes":100,"total_bytes":200,"track_count":2,"queue_count":1,"package_count":\(packageCount),"can_restore":false,"writes_allowed":\(writesAllowed),"can_keep_contents":\(canKeepContents),"recovery_path":"\(recoveryPath)"}\(extra)}}
         """
-        onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(json.utf8)))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        var result = try XCTUnwrap(object["result"] as? [String: Any])
+        var state = try XCTUnwrap(result["state"] as? [String: Any])
+        state["artwork_cache_key"] = artworkCacheKey
+        result["state"] = state; object["result"] = result
+        onEvent?(try Wire.decoder.decode(Envelope.self, from: JSONSerialization.data(withJSONObject: object)))
     }
 }
 

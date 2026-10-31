@@ -36,6 +36,28 @@ def call(backend: NativeBackend, command: str, **kwargs: Any) -> Result:
     )
 
 
+def test_artwork_cache_namespace_survives_restart_and_invalidates_database_changes(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = backend.state().artwork_cache_key
+    assert len(key) == 64
+    assert NativeBackend(backend.engine).state().artwork_cache_key == key
+    active = backend.engine.active
+    connection = backend.engine.coordinator._active
+    assert connection is not None
+    changed = replace(active.database_fingerprint, sha256="a" * 64)
+    monkeypatch.setattr(
+        connection, "active_ipod", replace(active, database_fingerprint=changed)
+    )
+    assert backend.state().artwork_cache_key != key
+    monkeypatch.setattr(
+        connection, "active_ipod", replace(active, artwork_database_fingerprint=changed)
+    )
+    assert backend.state().artwork_cache_key != key
+    monkeypatch.setattr(backend.engine.coordinator, "_active", None)
+    assert backend.state().artwork_cache_key == ""
+
+
 def test_audio_formats_inspect_real_files_read_only_and_cache_by_generation(
     backend: NativeBackend,
     connected: tuple[Device, ClassicDropEngine],  # noqa: F811
