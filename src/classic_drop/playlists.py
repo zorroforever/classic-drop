@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from uuid import uuid4
@@ -137,12 +138,17 @@ class PlaylistSession:
         *,
         playlist_id: int | None = None,
         now: int | None = None,
+        checkpoint: Callable[[], None] = lambda: None,
     ) -> tuple[Track, ...]:
         """Compute proposed rules without altering saved membership or history."""
         if playlist_id is not None and playlist_id in smart_playlist_references(smart):
             raise ValueError("A Smart Playlist cannot reference itself.")
         return preview_smart_playlist(
-            self.snapshot.tracks, smart, playlists=self.snapshot.playlists, now=now
+            self.snapshot.tracks,
+            smart,
+            playlists=self.snapshot.playlists,
+            now=now,
+            checkpoint=checkpoint,
         )
 
     def deletion_impact(self, playlist_id: int) -> tuple[Playlist, ...]:

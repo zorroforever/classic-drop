@@ -116,6 +116,7 @@ def refresh_smart_playlists(
                     playlist.smart,
                     playlists=snapshot.playlists,
                     now=instant,
+                    checkpoint=checkpoint,
                 )
             except ValueError as error:
                 raise ValueError(
@@ -141,38 +142,45 @@ def preview_smart_playlist(
     *,
     playlists: tuple[Playlist, ...] = (),
     now: int | None = None,
+    checkpoint: Callable[[], None] = lambda: None,
 ) -> tuple[Track, ...]:
     """Evaluate a supported definition without any source writes.
 
     Random selection uses a fixed seed so reopening a preview is stable.
     """
 
+    checkpoint()
     validate_smart_playlist(smart)
-    memberships = _saved_memberships(playlists)
+    memberships = _saved_memberships(playlists, checkpoint)
     missing = smart_playlist_references(smart) - memberships.keys()
     if missing:
         raise ValueError(
             f"Smart Playlist rule references missing Playlist {min(missing)}."
         )
     instant = int(time()) if now is None else now
-    selected = [
-        track
-        for track in tracks
-        if (not smart.checked_only or track.metadata.checked)
-        and (
+    selected: list[Track] = []
+    for track in tracks:
+        checkpoint()
+        if (not smart.checked_only or track.metadata.checked) and (
             not smart.match_rules
             or not smart.rules.rules
-            or _matches_group(track, smart.rules, instant, memberships)
-        )
-    ]
+            or _matches_group(track, smart.rules, instant, memberships, checkpoint)
+        ):
+            selected.append(track)
     limit = smart.limit
     if limit is None:
         return tuple(selected)
     if limit.sort == SmartLimitSort.RANDOM:
         Random(0).shuffle(selected)
     else:
-        selected.sort(key=_SORT_KEYS[limit.sort], reverse=limit.descending)
-    return _apply_limit(selected, limit)
+
+        def sort_key(track: Track) -> str | int:
+            checkpoint()
+            return _SORT_KEYS[limit.sort](track)
+
+        selected.sort(key=sort_key, reverse=limit.descending)
+    checkpoint()
+    return _apply_limit(selected, limit, checkpoint)
 
 
 def _matches_group(
@@ -180,10 +188,12 @@ def _matches_group(
     group: SmartRuleGroup,
     now: int,
     memberships: dict[int, frozenset[int]],
+    checkpoint: Callable[[], None],
 ) -> bool:
+    checkpoint()
     matches = all if group.match is SmartMatch.ALL else any
     return matches(
-        _matches_group(track, rule, now, memberships)
+        _matches_group(track, rule, now, memberships, checkpoint)
         if isinstance(rule, SmartRuleGroup)
         else _matches(track, rule, now, memberships)
         for rule in group.rules
@@ -275,12 +285,14 @@ def _media_kind(track: Track) -> SmartMediaKind:
 
 def _saved_memberships(
     playlists: tuple[Playlist, ...],
+    checkpoint: Callable[[], None],
 ) -> dict[int, frozenset[int]]:
     """Resolve saved membership, including Playlist Folder descendants."""
 
     by_id = {playlist.playlist_id: playlist for playlist in playlists}
     children: dict[int, list[int]] = {identity: [] for identity in by_id}
     for playlist in playlists:
+        checkpoint()
         if playlist.parent_id in children:
             children[playlist.parent_id].append(playlist.playlist_id)
     memberships: dict[int, frozenset[int]] = {}
@@ -289,18 +301,23 @@ def _saved_memberships(
         pending = [identity]
         visited: set[int] = set()
         while pending:
+            checkpoint()
             current = pending.pop()
             if current in visited:
                 continue
             visited.add(current)
             playlist = by_id[current]
-            tracks.update(playlist.track_ids)
+            for entry in playlist.entries:
+                checkpoint()
+                tracks.add(entry.track_id)
             pending.extend(children[current])
         memberships[identity] = frozenset(tracks)
     return memberships
 
 
-def _apply_limit(tracks: list[Track], limit: SmartPlaylistLimit) -> tuple[Track, ...]:
+def _apply_limit(
+    tracks: list[Track], limit: SmartPlaylistLimit, checkpoint: Callable[[], None]
+) -> tuple[Track, ...]:
     if limit.unit == SmartLimitUnit.TRACKS:
         return tuple(tracks[: limit.value])
     duration_limit = limit.unit in (SmartLimitUnit.MINUTES, SmartLimitUnit.HOURS)
@@ -315,6 +332,7 @@ def _apply_limit(tracks: list[Track], limit: SmartPlaylistLimit) -> tuple[Track,
     budget = limit.value * factor
     result: list[Track] = []
     for track in tracks:
+        checkpoint()
         cost = max(0, track.length_ms if duration_limit else track.size_bytes)
         if cost <= budget:
             result.append(track)
