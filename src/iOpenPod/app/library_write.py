@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Literal, Protocol
+
+from iPodDB.library import LibrarySnapshot, Playlist, Track, TrackMetadata
 
 if TYPE_CHECKING:
     import threading
@@ -17,7 +19,6 @@ if TYPE_CHECKING:
         ArtworkPixels,
         ArtworkRead,
         FileDependency,
-        LibrarySnapshot,
         LibraryWritePlan,
         LibraryWriteResult,
         PreparedPhoto,
@@ -55,6 +56,7 @@ class LibraryPreparationRequest:
     workspace_generation: int
     workspace_revision: int
     delete_omissions: bool = field(default=False, kw_only=True)
+    reconcile_sidecars: bool = field(default=False, kw_only=True)
     artwork: tuple[ArtworkAsset | TimedArtworkAsset, ...] = field(
         default=(), kw_only=True
     )
@@ -72,6 +74,89 @@ class LibraryPreparationRequest:
     normalize_podcasts: bool = field(default=False, kw_only=True)
     # Retained media whose embedded covers supplied new native artwork.
     artwork_dependencies: tuple[FileDependency, ...] = field(default=(), kw_only=True)
+
+
+def overlay_sidecar_snapshot(
+    original: LibrarySnapshot,
+    desired: LibrarySnapshot,
+    projected: LibrarySnapshot,
+) -> LibrarySnapshot:
+    """Apply source-bound semantic edits to a fresh, isolated sidecar projection.
+
+    Unedited fields and newly observed records belong to the projection. Existing
+    records are matched only by stable identity; overlapping changes and new-ID
+    collisions require reloading and manually reapplying the Host intent.
+    """
+    return replace(
+        projected,
+        tracks=_overlay_records(
+            original.tracks, desired.tracks, projected.tracks, lambda t: t.track_id
+        ),
+        playlists=_overlay_records(
+            original.playlists,
+            desired.playlists,
+            projected.playlists,
+            lambda p: p.playlist_id,
+        ),
+        device_name=desired.device_name
+        if desired.device_name != original.device_name
+        else projected.device_name,
+        photos=desired.photos
+        if desired.photos != original.photos
+        else projected.photos,
+    )
+
+
+def _overlay_records[Record: (Track, Playlist)](
+    original: tuple[Record, ...],
+    desired: tuple[Record, ...],
+    projected: tuple[Record, ...],
+    identity: Callable[[Record], int],
+) -> tuple[Record, ...]:
+    baseline = {identity(record): record for record in original}
+    fresh = {identity(record): record for record in projected}
+    if not baseline.keys() <= fresh.keys():
+        raise ValueError(
+            "Sidecar projection lost a source identity. Reload the Library."
+        )
+    result: list[Record] = []
+    for record in desired:
+        key = identity(record)
+        if key in baseline:
+            result.append(_overlay_fields(baseline[key], record, fresh[key]))
+        elif key in fresh:
+            raise ValueError(
+                f"Host and sidecar additions share identity {key}. Reload and reapply the edit."
+            )
+        else:
+            result.append(record)
+    result.extend(record for record in projected if identity(record) not in baseline)
+    return tuple(result)
+
+
+def _overlay_fields[Record: (Track, TrackMetadata, Playlist)](
+    original: Record, desired: Record, projected: Record
+) -> Record:
+    result = projected
+    for definition in fields(original):
+        name = definition.name
+        before, requested, observed = (
+            getattr(record, name) for record in (original, desired, projected)
+        )
+        if requested == before:
+            continue
+        if (
+            isinstance(before, TrackMetadata)
+            and isinstance(requested, TrackMetadata)
+            and isinstance(observed, TrackMetadata)
+        ):
+            requested = _overlay_fields(before, requested, observed)
+        elif observed != before and observed != requested:
+            raise ValueError(
+                f"Host and sidecar edits conflict on {name}. Reload and reapply the edit."
+            )
+        result = replace(result, **{name: requested})
+    return result
 
 
 @dataclass(frozen=True, slots=True)
