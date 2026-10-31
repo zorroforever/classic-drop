@@ -158,7 +158,9 @@ class NativePlaylists:
         backend.engine.library_changes.bind_queue(self.queue_state)
 
     def queue_state(self) -> ImportQueueState:
+        """Bind selected-source authority while retaining every row's Host intent."""
         b = self.backend
+        selected = {entry.token for entry in b.entries.values() if entry.selected}
         return ImportQueueState(
             b.revision,
             tuple(b.entries.values()),
@@ -166,8 +168,9 @@ class NativePlaylists:
             tuple(
                 ExistingTrackSelection(i.token, domain_id(i.track_id))
                 for i in self.reuse
+                if i.token in selected
             ),
-            self.allow_duplicates,
+            tuple(token for token in self.allow_duplicates if token in selected),
             self.queue_source,
         )
 
@@ -388,20 +391,14 @@ class NativePlaylists:
                 )
             if request.include_imports and request.revision != b.revision:
                 raise ValueError("The import queue changed; reload")
+            queue = self.queue_state()
             self.review = b.engine.library_changes.prepare(
                 session,
-                tuple(b.entries.values()) if request.include_imports else (),
-                self.destination.domain()
-                if request.include_imports
-                else ImportDestination(),
+                queue.entries if request.include_imports else (),
+                queue.destination if request.include_imports else ImportDestination(),
                 cancelled,
-                reuse=tuple(
-                    ExistingTrackSelection(i.token, domain_id(i.track_id))
-                    for i in self.reuse
-                )
-                if request.include_imports
-                else (),
-                allow_duplicates=self.allow_duplicates
+                reuse=queue.reuse if request.include_imports else (),
+                allow_duplicates=queue.allow_duplicates
                 if request.include_imports
                 else (),
             )

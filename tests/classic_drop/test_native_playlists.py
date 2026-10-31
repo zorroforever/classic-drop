@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import asdict
+from pathlib import Path
 from threading import Event
 from typing import Any
 
@@ -795,3 +796,145 @@ def test_preparing_added_files_retains_acknowledged_queue_order(
     added = call(backend, "preview", paths=(str(third),))
     assert tuple(row.token for row in added.preview[:2]) == tokens[::-1]
     assert added.preview[2].path == str(third)
+
+
+@pytest.mark.parametrize("choice", ["reuse", "copy"])
+def test_review_excludes_deselected_row_authority_and_keeps_choice_for_reselection(
+    backend: NativeBackend, tmp_path: Path, choice: str
+) -> None:
+    from classic_drop.native_playlists import ExistingTrackDTO, ImportDestinationDTO
+    from classic_drop.native_protocol import Edit
+    from tests.classic_drop.test_media import media_file
+
+    original = str(media_file(tmp_path))
+    call(backend, "preview", paths=(original,))
+    first_review = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert first_review is not None
+    call(
+        backend,
+        "playlist_save",
+        playlist_revision=draft(backend),
+        token=first_review.token,
+    )
+    prior_count = len(backend.engine.active.library.tracks)
+    existing_id = str(backend.engine.active.library.tracks[-1].track_id)
+    new_path = str(media_file(tmp_path, "tone.m4a"))
+    rows = call(backend, "preview", paths=(original, new_path)).preview
+    duplicate = next(row for row in rows if row.path == original)
+    fresh = next(row for row in rows if row.path == new_path)
+    assert duplicate.status == "confirmed_duplicate" and fresh.status == "new"
+    call(
+        backend,
+        "import_destination",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        destination=ImportDestinationDTO(new_name="Only selected songs"),
+        reuse=(ExistingTrackDTO(duplicate.token, existing_id),)
+        if choice == "reuse"
+        else (),
+        allow_duplicates=(duplicate.token,) if choice == "copy" else (),
+    )
+    call(
+        backend,
+        "edit",
+        revision=backend.revision,
+        edits=(
+            Edit(
+                duplicate.token,
+                title=duplicate.title,
+                selected=True,
+                allow_duplicate=choice == "copy",
+            ),
+        ),
+    )
+    call(
+        backend,
+        "edit",
+        revision=backend.revision,
+        edits=(
+            Edit(
+                duplicate.token,
+                title=duplicate.title,
+                selected=False,
+                allow_duplicate=choice == "copy",
+            ),
+        ),
+    )
+    reviewed = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert reviewed is not None and reviewed.added == 1 and reviewed.reused == 0
+    if choice == "reuse":
+        assert backend.playlist_adapter.reuse == (
+            ExistingTrackDTO(duplicate.token, existing_id),
+        )
+    else:
+        assert duplicate.token in backend.playlist_adapter.allow_duplicates
+    # The retained row choice becomes active only after explicit reselection.
+    call(
+        backend,
+        "edit",
+        revision=backend.revision,
+        edits=(
+            Edit(
+                duplicate.token,
+                title=duplicate.title,
+                selected=True,
+                allow_duplicate=choice == "copy",
+            ),
+        ),
+    )
+    reselected = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert reselected is not None
+    assert (reselected.added, reselected.reused) == (
+        (1, 1) if choice == "reuse" else (2, 0)
+    )
+    call(
+        backend,
+        "edit",
+        revision=backend.revision,
+        edits=(
+            Edit(
+                duplicate.token,
+                title=duplicate.title,
+                selected=False,
+                allow_duplicate=choice == "copy",
+            ),
+        ),
+    )
+    reviewed = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert reviewed is not None
+    call(
+        backend, "playlist_save", playlist_revision=draft(backend), token=reviewed.token
+    )
+    assert len(backend.engine.active.library.tracks) == prior_count + 1
+    playlist = next(
+        p
+        for p in backend.engine.active.library.playlists
+        if p.name == "Only selected songs"
+    )
+    assert (
+        len(playlist.entries) == 1 and str(playlist.entries[0].track_id) != existing_id
+    )
