@@ -388,6 +388,24 @@ class NativeBackend:
             return self._preview_page(request)
         if command == "queue":
             return self._preview_page(request)
+        if command == "queue_reorder":
+            if request.revision != self.revision:
+                raise ValueError("The import queue changed; reload")
+            if self.playlist_adapter.carryover is not None:
+                raise ValueError(
+                    "Prepare the retained Host queue again before reordering"
+                )
+            if (
+                len(request.ids) != len(self.entries)
+                or set(request.ids) != self.entries.keys()
+            ):
+                raise ValueError(
+                    "Reorder the complete import queue with each source token exactly once"
+                )
+            self.entries = {token: self.entries[token] for token in request.ids}
+            self.revision = uuid4().hex
+            self.playlist_adapter.queue_changed()
+            return self._preview_page(request)
         if command in {"edit", "commit"}:
             self._apply_edits(request)
             if command == "edit":

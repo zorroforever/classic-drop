@@ -647,3 +647,151 @@ def test_declared_batch_size_requires_integer_json() -> None:
         }
         with pytest.raises(ValueError):
             Request.decode(json.dumps(raw).encode())
+
+
+def test_queue_reorder_rejects_stale_or_incomplete_manifest_without_mutation(
+    backend: NativeBackend, tmp_path: Any
+) -> None:
+    from tests.classic_drop.test_media import media_file
+
+    first = media_file(tmp_path)
+    second = tmp_path / "second.m4a"
+    second.write_bytes(first.read_bytes())
+    call(backend, "preview", paths=(str(first), str(second)))
+    original = tuple(backend.entries)
+    revision = backend.revision
+    for manifest in (original[:1], (*original, original[0]), (original[0], "expired")):
+        with pytest.raises(ValueError, match="complete import queue"):
+            call(backend, "queue_reorder", revision=revision, ids=manifest)
+        assert tuple(backend.entries) == original and backend.revision == revision
+    with pytest.raises(ValueError, match="queue changed"):
+        call(backend, "queue_reorder", revision="expired", ids=original[::-1])
+    assert tuple(backend.entries) == original and backend.revision == revision
+
+
+def test_queue_reorder_controls_combined_destination_and_invalidates_review(
+    backend: NativeBackend, tmp_path: Any
+) -> None:
+    from classic_drop.native_playlists import ImportDestinationDTO
+    from classic_drop.native_protocol import Edit
+    from tests.classic_drop.test_media import media_file
+
+    first = media_file(tmp_path)
+    second = tmp_path / "second.m4a"
+    second.write_bytes(first.read_bytes())
+    call(backend, "preview", paths=(str(first), str(second)))
+    tokens = tuple(backend.entries)
+    call(
+        backend,
+        "edit",
+        revision=backend.revision,
+        edits=tuple(
+            Edit(token, title=f"Song {index}", selected=True, allow_duplicate=True)
+            for index, token in enumerate(tokens)
+        ),
+    )
+    call(
+        backend,
+        "import_destination",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        destination=ImportDestinationDTO(new_name="Ordered"),
+        allow_duplicates=tokens,
+    )
+    reviewed = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert reviewed is not None
+    revision = backend.revision
+    result = call(backend, "queue_reorder", revision=revision, ids=tokens[::-1])
+    assert tuple(row.token for row in result.preview) == tokens[::-1]
+    assert backend.revision != revision
+    with pytest.raises(ValueError, match="Review expired"):
+        call(
+            backend,
+            "playlist_save",
+            playlist_revision=draft(backend),
+            token=reviewed.token,
+        )
+    reviewed = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert reviewed is not None
+    call(
+        backend, "playlist_save", playlist_revision=draft(backend), token=reviewed.token
+    )
+    playlist = next(
+        p for p in backend.engine.active.library.playlists if p.name == "Ordered"
+    )
+    titles = {t.track_id: t.title for t in backend.engine.active.library.tracks}
+    assert tuple(titles[entry.track_id] for entry in playlist.entries) == (
+        "Song 1",
+        "Song 0",
+    )
+
+
+def test_queue_reorder_requires_repreparing_retained_host_intent(
+    backend: NativeBackend, tmp_path: Any
+) -> None:
+    from tests.classic_drop.test_media import media_file
+
+    first = media_file(tmp_path)
+    second = tmp_path / "second.m4a"
+    second.write_bytes(first.read_bytes())
+    call(backend, "preview", paths=(str(first), str(second)))
+    tokens = tuple(backend.entries)
+    reordered = call(
+        backend, "queue_reorder", revision=backend.revision, ids=tokens[::-1]
+    )
+    ordered_paths = tuple(row.path for row in reordered.preview)
+    call(
+        backend,
+        "playlist_edit",
+        playlist_revision=draft(backend),
+        playlist_edit=PlaylistEdit(PlaylistAction.CREATE, name="Save only"),
+    )
+    reviewed = call(
+        backend, "playlist_prepare", playlist_revision=draft(backend)
+    ).playlist_review
+    assert reviewed is not None
+    call(
+        backend, "playlist_save", playlist_revision=draft(backend), token=reviewed.token
+    )
+    with pytest.raises(ValueError, match="Prepare the retained Host queue"):
+        call(backend, "queue_reorder", revision=backend.revision, ids=tokens)
+    retained = call(backend, "queue")
+    assert retained.state.queue_count == 2
+    assert tuple(row.path for row in retained.preview) == ordered_paths
+    prepared = call(
+        backend,
+        "queue_reprepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+    )
+    assert tuple(row.path for row in prepared.preview) == ordered_paths
+
+
+def test_preparing_added_files_retains_acknowledged_queue_order(
+    backend: NativeBackend, tmp_path: Any
+) -> None:
+    from tests.classic_drop.test_media import media_file
+
+    first = media_file(tmp_path)
+    second = tmp_path / "second.m4a"
+    second.write_bytes(first.read_bytes())
+    third = tmp_path / "third.m4a"
+    third.write_bytes(first.read_bytes())
+    call(backend, "preview", paths=(str(first), str(second)))
+    tokens = tuple(backend.entries)
+    call(backend, "queue_reorder", revision=backend.revision, ids=tokens[::-1])
+    added = call(backend, "preview", paths=(str(third),))
+    assert tuple(row.token for row in added.preview[:2]) == tokens[::-1]
+    assert added.preview[2].path == str(third)
