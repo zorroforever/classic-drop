@@ -238,6 +238,8 @@ class PlaylistSession:
                 candidate.remove_playlist(playlist_id, candidate.edit_revision)
                 result = None
             elif action is PlaylistAction.APPEND:
+                if target.kind is not PlaylistKind.PLAYLIST:
+                    raise ValueError("Only regular Playlists allow membership edits.")
                 added: list[int] = []
                 seen = set(target.track_ids)
                 for track_id in edit.track_ids:
@@ -250,7 +252,11 @@ class PlaylistSession:
                     else:
                         added.append(track_id)
                         seen.add(track_id)
-                result = candidate.set_tracks(playlist_id, (*target.track_ids, *added))
+                result = (
+                    candidate.set_tracks(playlist_id, (*target.track_ids, *added))
+                    if added
+                    else target
+                )
             elif action in (
                 PlaylistAction.REMOVE_ENTRIES,
                 PlaylistAction.MOVE_ENTRIES_UP,

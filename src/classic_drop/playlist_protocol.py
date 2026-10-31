@@ -164,8 +164,8 @@ def _keys(
         raise ValueError("Missing or unknown Playlist field.")
 
 
-def _text(raw: object) -> str:
-    if not isinstance(raw, str) or len(raw) > 16384:
+def _text(raw: object, *, maximum_chars: int = 16384) -> str:
+    if not isinstance(raw, str) or len(raw) > maximum_chars:
         raise ValueError("Expected bounded Playlist text.")
     try:
         raw.encode("utf-16-be")
@@ -215,7 +215,8 @@ def _rule_value(raw: object, smart_field: SmartField) -> SmartRuleValue:
             else SmartLocation(text)
         )
     if kind is SmartValueKind.TEXT:
-        return _text(item)
+        # Rule payloads are bounded by the complete configuration, not label size.
+        return _text(item, maximum_chars=MAX_CONFIGURATION_BYTES)
     return _integer(item)
 
 

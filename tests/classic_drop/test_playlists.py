@@ -307,3 +307,41 @@ def test_regular_copy_respects_explicit_default_sort_order() -> None:
     )
     assert result.playlist is not None
     assert result.playlist.sort_order is PlaylistSortOrder.DEFAULT
+
+
+@pytest.mark.parametrize("position", [None, 7])
+def test_fully_skipped_append_preserves_retained_positions_and_history(
+    position: int | None,
+) -> None:
+    original = replace(
+        library(),
+        playlists=(
+            Playlist(10, "Retained", entries=(PlaylistEntry("saved", 1, position),)),
+        ),
+    )
+    session = drafts.PlaylistSession(original)
+    revision = session.revision
+    result = apply(session, "append", playlist_id=10, track_ids=(1, 1))
+    assert result.skipped_duplicates == 2
+    assert session.snapshot == original
+    assert session.revision == revision
+    assert not session.dirty and not session.can_undo
+
+
+@pytest.mark.parametrize("kind", [PlaylistKind.SMART, PlaylistKind.FOLDER])
+def test_skipped_append_still_rejects_nonordinary_targets(kind: PlaylistKind) -> None:
+    original = replace(
+        library(),
+        playlists=(
+            Playlist(
+                10,
+                "Protected membership",
+                kind=kind,
+                entries=(PlaylistEntry("saved", 1, 7),),
+            ),
+        ),
+    )
+    session = drafts.PlaylistSession(original)
+    with pytest.raises(ValueError, match="regular Playlists"):
+        apply(session, "append", playlist_id=10, track_ids=(1,))
+    assert session.snapshot == original and not session.can_undo

@@ -252,6 +252,18 @@ def test_configuration_limit_counts_actual_native_utf8_encoding() -> None:
     assert wire.smart_from_json(raw) == smart
 
 
+def test_supported_rule_text_round_trips_beyond_label_text_limit() -> None:
+    smart = SmartPlaylist(
+        rules=SmartRuleGroup(
+            rules=(SmartRule(SmartField.TITLE, SmartOperator.IS, "x" * 17000),)
+        )
+    )
+    dto = wire.smart_to_dto(smart)
+    assert dto.supported and dto.editable
+    raw = json.loads(json.dumps(asdict(dto)))
+    assert wire.smart_from_json(raw) == smart
+
+
 def test_oversize_rule_input_is_rejected_as_one_complete_configuration() -> None:
     raw = payload()
     raw["rules"] = {
