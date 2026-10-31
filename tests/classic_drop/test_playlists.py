@@ -309,6 +309,47 @@ def test_regular_copy_respects_explicit_default_sort_order() -> None:
     assert result.playlist.sort_order is PlaylistSortOrder.DEFAULT
 
 
+def test_persist_temporary_sort_switches_to_manual_in_one_undoable_edit() -> None:
+    session = drafts.PlaylistSession(library())
+    apply(session, "update", playlist_id=10, sort_order=PlaylistSortOrder.TITLE)
+    before = session.snapshot
+    apply(
+        session,
+        "reorder_entries",
+        playlist_id=10,
+        entry_ids=("c", "b", "a"),
+        sort_order=PlaylistSortOrder.MANUAL,
+    )
+    assert session.playlist(10).sort_order is PlaylistSortOrder.MANUAL
+    assert tuple(e.entry_id for e in session.playlist(10).entries) == ("c", "b", "a")
+    session.undo(expected_revision=session.revision)
+    assert session.snapshot == before
+
+
+@pytest.mark.parametrize(
+    ("entry_ids", "sort_order"),
+    [
+        (("c", "b"), PlaylistSortOrder.MANUAL),
+        (("c", "b", "a"), PlaylistSortOrder.TITLE),
+    ],
+)
+def test_persist_temporary_sort_rejects_partial_or_nonmanual_override(
+    entry_ids: tuple[str, ...], sort_order: PlaylistSortOrder
+) -> None:
+    session = drafts.PlaylistSession(library())
+    before = session.snapshot
+    with pytest.raises(ValueError):
+        apply(
+            session,
+            "reorder_entries",
+            playlist_id=10,
+            entry_ids=entry_ids,
+            sort_order=sort_order,
+        )
+    assert session.snapshot == before
+    assert not session.can_undo
+
+
 @pytest.mark.parametrize("position", [None, 7])
 def test_fully_skipped_append_preserves_retained_positions_and_history(
     position: int | None,

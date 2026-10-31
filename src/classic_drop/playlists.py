@@ -282,8 +282,12 @@ class PlaylistSession:
             elif action is PlaylistAction.REORDER_ENTRIES:
                 if (
                     target.kind is not PlaylistKind.PLAYLIST
-                    or target.sort_order
-                    not in (PlaylistSortOrder.DEFAULT, PlaylistSortOrder.MANUAL)
+                    or edit.sort_order not in (None, PlaylistSortOrder.MANUAL)
+                    or (
+                        edit.sort_order is None
+                        and target.sort_order
+                        not in (PlaylistSortOrder.DEFAULT, PlaylistSortOrder.MANUAL)
+                    )
                 ):
                     raise ValueError(
                         "Only a complete Manual Playlist can be reordered."
@@ -297,7 +301,13 @@ class PlaylistSession:
                         "Reorder the complete set of exact Playlist Entries."
                     )
                 result = replace(
-                    target, entries=tuple(entries[i] for i in edit.entry_ids)
+                    target,
+                    entries=tuple(entries[i] for i in edit.entry_ids),
+                    sort_order=(
+                        target.sort_order
+                        if edit.sort_order is None
+                        else edit.sort_order
+                    ),
                 )
                 candidate.load(
                     replace(
