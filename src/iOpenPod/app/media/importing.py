@@ -102,10 +102,15 @@ class MusicImporter:
         profile: DeviceProfile,
         *,
         checkpoint: Callable[[], None],
+        allow_high_resolution_alac: bool = False,
     ) -> ImportedSong:
         with capture_host_file(source, checkpoint=checkpoint) as captured:
             observed = self._inspector.inspect_captured(captured, checkpoint=checkpoint)
-            encoding = _encoding(observed, profile)
+            encoding = _encoding(
+                observed,
+                profile,
+                allow_high_resolution_alac=allow_high_resolution_alac,
+            )
             checkpoint()
             # All tag/artwork reads observe the same private snapshot as FFprobe.
             with LocalHostFile.observe(captured.snapshot).open_read(
@@ -173,9 +178,22 @@ class MusicImporter:
         )
 
 
-def _encoding(observed: MediaInspection, profile: DeviceProfile) -> AudioEncoding:
+def _encoding(
+    observed: MediaInspection,
+    profile: DeviceProfile,
+    *,
+    allow_high_resolution_alac: bool = False,
+) -> AudioEncoding:
     def reject(detail: str) -> None:
-        raise MediaInspectionError("media.incompatible", detail)
+        # An explicitly original ALAC must fail validation, never silently
+        # fall back to conversion (for example when its channels are unsupported).
+        code = (
+            "media.alac_original_incompatible"
+            if allow_high_resolution_alac
+            and any(a.codec == "alac" for a in observed.audio_streams)
+            else "media.incompatible"
+        )
+        raise MediaInspectionError(code, detail)
 
     if len(observed.audio_streams) != 1 or any(
         s.kind is StreamKind.VIDEO and s.attached_picture is not True
@@ -185,10 +203,18 @@ def _encoding(observed: MediaInspection, profile: DeviceProfile) -> AudioEncodin
             "Add Music requires one audio stream and no motion video; select a prepared music file."
         )
     audio = observed.audio_streams[0]
+    original_alac = (
+        allow_high_resolution_alac
+        and audio.codec == "alac"
+        and audio.codec_tag == "alac"
+        and "mov" in observed.containers
+        and profile.capabilities.audio.supports_alac
+    )
     if (
         audio.channels not in (1, 2)
         or not audio.sample_rate_hz
-        or audio.sample_rate_hz > 48000
+        or audio.sample_rate_hz <= 0
+        or (audio.sample_rate_hz > 48000 and not original_alac)
     ):
         reject(
             "Prepare mono or stereo music at a sample rate of at most 48 kHz for this iPod."
@@ -205,7 +231,8 @@ def _encoding(observed: MediaInspection, profile: DeviceProfile) -> AudioEncodin
                 reject("Prepare AAC LC at no more than 320 kb/s for this iPod.")
             return AudioEncoding.AAC
         if audio.codec == "alac" and profile.capabilities.audio.supports_alac:
-            if (audio.bits_per_raw_sample or audio.bits_per_sample) != 16:
+            precision = audio.bits_per_raw_sample or audio.bits_per_sample
+            if precision not in ((16, 20, 24, 32) if original_alac else (16,)):
                 reject("Prepare 16-bit Apple Lossless audio for this iPod.")
             return AudioEncoding.ALAC
     if audio.codec == "pcm_s16le" and "wav" in containers:

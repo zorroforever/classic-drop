@@ -505,6 +505,17 @@ ADR-0177. Its removal package is bound to one Active iPod, Library Snapshot, and
 database fingerprint; the single Storage Transaction retains removed media and
 prior database files on that iPod for restoration. This exception does not change
 other Library save cleanup policies.
+ADR-0181 permits explicitly keeping a completed Classic Drop removal as the current
+baseline before subsequent writes. Acceptance changes Host history only, retires
+earlier automatic undo choices, and retains all device recovery files; interrupted
+operations and Storage restoration checks keep their existing restrictions.
+Classic Drop offers an explicit, initially disabled original-ALAC import option
+that preserves source precision and sample rate while retaining validation and
+Storage safety. It does not change general hardware compatibility limits; see
+ADR-0182.
+New or renamed composers with multiple historical native IDs receive a fresh ID
+without renumbering existing Tracks; unique retained candidates are still reused.
+See ADR-0183 for import reconciliation and independent verification.
 Classic Drop also has an opt-in SwiftUI/AppKit native build with a bundled
 headless Python helper, album grid/detail pages, import editing, removal Review,
 recovery and persistent phase-scoped progress. The Qt entry remains a migration

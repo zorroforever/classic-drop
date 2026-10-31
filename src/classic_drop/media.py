@@ -155,18 +155,35 @@ def prepare_song(
     checkpoint: Callable[[], None],
     *,
     progress: Callable[[MediaPreparationProgress], None] | None = None,
+    allow_high_resolution_alac: bool = False,
 ) -> PreparedSong:
     source = HostPath(path)
     importer = MusicImporter()
     try:
-        song = importer.inspect(source, profile, checkpoint=checkpoint)
+        song = importer.inspect(
+            source,
+            profile,
+            checkpoint=checkpoint,
+            allow_high_resolution_alac=allow_high_resolution_alac,
+        )
     except MediaInspectionError as error:
         if error.code != "media.incompatible":
             raise
     else:
         if song.artwork is None:
             song = replace(song, artwork=folder_cover(path, checkpoint))
-        return PreparedSong(path, song.source.fingerprint, _music(song), "copy")
+        warnings: tuple[str, ...] = ()
+        if (
+            allow_high_resolution_alac
+            and song.track.metadata.file_format == "Apple Lossless audio file"
+        ):
+            warnings = (
+                "ALAC original import: preserving source bytes and "
+                f"{song.track.metadata.sample_rate_hz} Hz. Playback compatibility must be tested on this iPod.",
+            )
+        return PreparedSong(
+            path, song.source.fingerprint, _music(song), "copy", warnings
+        )
 
     # Read tags/pixels from the same capture whose fingerprint the transcoder
     # must accept. MP4 conversion may legitimately drop the original tags.

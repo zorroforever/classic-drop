@@ -27,6 +27,7 @@ from iPodDB.iTunesDB.shared.chunk_defs.mhod_payloads.string_mhod import (
 )
 from iPodDB.iTunesDB.shared.chunk_defs.mhod_payloads.url_mhod import MhodUrlPayload
 from iPodDB.iTunesDB.shared.constants import MhodType
+from iPodDB.iTunesDB.shared.field_converters import sample_rate_to_fixed
 from iPodDB.library._field_policy import (
     DATE_FIELDS,
     METADATA_FIELDS,
@@ -331,7 +332,7 @@ def edit_track(
         ):
             values["video_flag_2"] = values["video_flag"]
     if meta.sample_rate_hz != prior.sample_rate_hz:
-        values["sample_rate_1"] = meta.sample_rate_hz << 16
+        values["sample_rate_1"] = sample_rate_to_fixed(meta.sample_rate_hz)
         values["sample_rate_2"] = float(meta.sample_rate_hz)
     if meta.checked != prior.checked or old is None:
         values["checked_flag"] = int(not meta.checked)

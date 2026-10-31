@@ -37,6 +37,8 @@ final class AppModel: ObservableObject {
     @Published var closing = false
     @Published var cancelRequested = false
     @Published var error = ""
+    @Published var audioFormats: [String: AudioFormatDTO] = [:]
+    @Published private(set) var audioFormatReadingEnabled = false
     @Published var images: [String: NSImage] = [:]
     @Published var query = ""
     @Published var albumMode = true
@@ -44,6 +46,7 @@ final class AppModel: ObservableObject {
     @Published var selectedAlbum: AlbumDTO?
     @Published var openAlbum: AlbumDTO?
     @Published var selectedTracks = Set<String>()
+    @Published private(set) var alacOriginalImport = false
     @Published var selectedQueue: String?
     @Published var selectedMatches = Set<String>()
     @Published var selectedPackage = Set<String>()
@@ -64,6 +67,7 @@ final class AppModel: ObservableObject {
         let command: String
         let generation: String
         let token: String?
+        let ids: [String]
         let epoch: Int
         let completion: ((ResultDTO) -> Void)?
     }
@@ -72,7 +76,16 @@ final class AppModel: ObservableObject {
     private var artworkDemand: [String: Int] = [:]
     private var artworkPending: [String] = []
     private var artworkInFlight = Set<String>()
+    private var speculativeArtwork = Set<String>()
+    private var artworkPrefetchPending: [String] = []
+    private var artworkPrefetchRemaining = Set<String>()
+    private let artworkCache: any ArtworkCaching
     private var imageOrder: [String] = []
+    private var audioDemand: [String: Int] = [:]
+    private var audioPending: [String] = []
+    private var audioRequested = Set<String>()
+    private var audioRequestID: String?
+    private var ignoredAudioRequestID: String?
     private var browserEpoch = 0
     private var albumLoad = 0
     private var trackLoad = 0
@@ -88,9 +101,15 @@ final class AppModel: ObservableObject {
     private var searchWork: DispatchWorkItem?
     private var monitor: Timer?
     private var unknownWrite = false
-    init(client: any HelperConnection = HelperClient()) { self.client = client }
+    init(client: any HelperConnection = HelperClient(), artworkCache: any ArtworkCaching = ArtworkDiskCache()) {
+        self.client = client
+        self.artworkCache = artworkCache
+    }
     var busy: Bool { task?.running == true }
     var connected: Bool { !(state?.activeId.isEmpty ?? true) }
+    var inspectorEligible: Bool {
+        openAlbum == nil && [.library, .incoming].contains(workspace)
+    }
     var writable: Bool { ready && connected && state?.writesAllowed == true && !busy && !unknownWrite }
     var t: (String) -> String { strings.text }
 
@@ -124,10 +143,18 @@ final class AppModel: ObservableObject {
         configure(&request)
         if foreground { cancelRequested = false; task = TaskState(id: request.id, command: command) }
         if command == "prepare_browser" { preparationID = request.id }
-        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, epoch: browserEpoch, completion: completion)
+        pending[request.id] = Pending(command: command, generation: request.generation, token: request.token, ids: request.ids ?? [], epoch: browserEpoch, completion: completion)
+        if command == "audio_formats" { audioRequestID = request.id }
         do { try client.send(request) }
         catch {
             pending.removeValue(forKey: request.id)
+            if ["artwork", "preview_artwork"].contains(command), let token = request.token {
+                finishArtwork(command == "preview_artwork" ? "preview:\(token)" : token, epoch: browserEpoch)
+            }
+            if command == "audio_formats" {
+                audioRequestID = nil
+                for id in request.ids ?? [] { audioFormats[id] = AudioFormatDTO(id: id, detail: String(describing: error)) }
+            }
             if foreground { task?.finish(code: "failed", detail: String(describing: error)) }
             self.error = t("helper.unavailable") + "\n" + String(describing: error)
         }
@@ -141,17 +168,28 @@ final class AppModel: ObservableObject {
             return
         }
         guard let operation = pending.removeValue(forKey: envelope.id) else { return }
+        if envelope.id == audioRequestID { audioRequestID = nil }
+        let ignoredAudio = envelope.id == ignoredAudioRequestID
+        if ignoredAudio { ignoredAudioRequestID = nil }
         let artwork = ["artwork", "preview_artwork"].contains(operation.command)
-        if artwork, let token = operation.token {
+        if artwork, let token = operation.token,
+           envelope.event == "error" || operation.epoch != browserEpoch {
             let key = operation.command == "preview_artwork" ? "preview:\(token)" : token
-            artworkInFlight.remove("\(operation.epoch):\(key)")
+            finishArtwork(key, epoch: operation.epoch)
         }
-        defer { if artwork { dispatchArtwork() } }
-        guard operation.epoch == browserEpoch else { return }
+        defer {
+            dispatchArtwork()
+            dispatchAudioFormats()
+        }
+        guard !ignoredAudio, operation.epoch == browserEpoch else { return }
         let stateCommand = ["hello", "discover", "select", "commit", "delete", "restore", "eject"].contains(operation.command)
         if !stateCommand, let result = envelope.result, result.state.generation != state?.generation { return }
         if let result = envelope.result { apply(result.state) }
         if envelope.event == "error" {
+            if operation.command == "audio_formats" {
+                for id in operation.ids { audioFormats[id] = AudioFormatDTO(id: id, detail: envelope.detail) }
+                return
+            }
             if artwork { return }
             if operation.command == "hello" { perform("close") }
             if task?.id == envelope.id { task?.finish(code: envelope.code, detail: envelope.detail) }
@@ -188,7 +226,9 @@ final class AppModel: ObservableObject {
         allTracks = []; allAlbums = []; musicIDs = []
         if task?.command == "prepare_browser" { task = nil }
         albums = []; tracks = []; albumTracks = []; matches = []; package = []
+        audioFormats = [:]; audioDemand = [:]; audioPending = []; audioRequested = []
         images = [:]; imageOrder = []; requestedArtwork = []; artworkPending = []; artworkDemand = [:]
+        artworkPrefetchPending = []; artworkPrefetchRemaining = []
         selectedTracks = []; selectedMatches = []; selectedPackage = []
         openAlbum = nil; selectedAlbum = nil; review = nil
         albumTotal = 0; trackTotal = 0; detailTotal = 0; matchTotal = 0
@@ -199,6 +239,7 @@ final class AppModel: ObservableObject {
         if let old = state, old.generation != new.generation {
             clearBrowser()
             queue = []; edits = [:]; selectedQueue = nil; dirty = []
+            alacOriginalImport = false
         }
         state = new
     }
@@ -208,7 +249,9 @@ final class AppModel: ObservableObject {
         case "preview": return String(format: t("prepared.summary"), result.state.queueCount)
         case "commit": return String(format: t("import.summary"), result.count ?? 0)
         case "delete": return String(format: t("removal.summary"), result.count ?? 0)
+        case "package_add": return t("package") + " · \(result.state.packageCount)"
         case "restore": return t("restore.summary")
+        case "keep": return t("keep.summary")
         default: return t("finished")
         }
     }
@@ -223,7 +266,11 @@ final class AppModel: ObservableObject {
         }
         clearBrowser()
         artworkInFlight = []
+        speculativeArtwork = []
+        audioRequestID = nil
+        ignoredAudioRequestID = nil
         state = nil; queue = []; edits = [:]
+        alacOriginalImport = false
         error = t(unknownWrite ? "write.unknown" : "helper.stopped") + " (\(status))"
     }
 
@@ -361,11 +408,23 @@ final class AppModel: ObservableObject {
         browserPreparing = false; browserReady = true
         applyLibraryFilter()
         if task?.command == "prepare_browser" { task = nil }
-        dispatchArtwork()
+        if state?.artworkCacheKey?.isEmpty == false {
+            artworkPrefetchPending = Set(allTracks.map(\.artworkId) + allAlbums.map(\.artworkId))
+                .filter { !$0.isEmpty && $0 != "0" }.sorted()
+            artworkPrefetchRemaining = Set(artworkPrefetchPending)
+        }
+        dispatchArtwork(); dispatchAudioFormats()
     }
 
     func open(_ album: AlbumDTO) {
         selectedAlbum = album; openAlbum = album; loadDetail()
+    }
+
+    func selectAlbum(_ album: AlbumDTO) {
+        guard browserReady, !busy else { return }
+        selectedAlbum = album
+        selectedTracks = Set(allTracks.filter { $0.albumId == album.id }.map(\.id)).intersection(musicIDs)
+        inspector = true
     }
 
     func loadDetail(more: Bool = false) { applyLibraryFilter() }
@@ -390,6 +449,59 @@ final class AppModel: ObservableObject {
     func addLibrarySelection() {
         guard browserReady, !busy, selectedMusicCount > 0 else { return }
         addToPackage(selectedTracks.intersection(musicIDs), source: t("library"))
+    }
+
+    func audioTrackIDs(for album: AlbumDTO) -> [String] {
+        allTracks.filter { $0.albumId == album.id }.map(\.id)
+    }
+
+    var audioFormatPlaceholder: String { audioFormatReadingEnabled ? "…" : "—" }
+
+    func setAudioFormatReadingEnabled(_ enabled: Bool) {
+        guard !closing, enabled != audioFormatReadingEnabled else { return }
+        audioFormatReadingEnabled = enabled
+        if enabled {
+            audioPending = audioDemand.keys.sorted().filter { audioFormats[$0] == nil && !audioRequested.contains($0) }
+            dispatchAudioFormats()
+        } else {
+            audioPending = []; audioRequested = []
+            if let id = audioRequestID {
+                ignoredAudioRequestID = id
+                var cancel = RequestDTO("cancel"); cancel.token = id
+                try? client.send(cancel)
+            }
+        }
+    }
+
+    func acquireAudioFormats(_ ids: [String]) {
+        for id in ids {
+            audioDemand[id, default: 0] += 1
+            if audioFormats[id] == nil && !audioRequested.contains(id) && !audioPending.contains(id) {
+                audioPending.append(id)
+            }
+        }
+        dispatchAudioFormats()
+    }
+
+    func releaseAudioFormats(_ ids: [String]) {
+        for id in ids {
+            let remaining = (audioDemand[id] ?? 0) - 1
+            if remaining > 0 { audioDemand[id] = remaining }
+            else { audioDemand.removeValue(forKey: id); audioPending.removeAll { $0 == id } }
+        }
+    }
+
+    private func dispatchAudioFormats() {
+        guard audioFormatReadingEnabled, ready, connected, browserReady, !busy, !closing, audioRequestID == nil else { return }
+        audioPending.removeAll { audioDemand[$0] == nil || audioFormats[$0] != nil || audioRequested.contains($0) }
+        let ids = Array(audioPending.prefix(8))
+        guard !ids.isEmpty else { return }
+        audioPending.removeFirst(ids.count)
+        audioRequested.formUnion(ids)
+        perform("audio_formats", configure: { $0.ids = ids }) { result in
+            let rows = Dictionary((result.audioFormats ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for id in ids { self.audioFormats[id] = rows[id] ?? AudioFormatDTO(id: id) }
+        }
     }
 
     func artwork(_ id: String, preview: Bool = false) {
@@ -418,25 +530,91 @@ final class AppModel: ObservableObject {
     func resumeArtwork() { dispatchArtwork() }
 
     private func dispatchArtwork() {
-        guard ready, connected, !busy, !browserPreparing else { return }
-        while artworkInFlight.count < 2, !artworkPending.isEmpty {
-            let key = artworkPending.removeFirst()
-            guard artworkDemand[key] != nil else { requestedArtwork.remove(key); continue }
-            let preview = key.hasPrefix("preview:")
-            let id = preview ? String(key.dropFirst(8)) : key
-            let epoch = browserEpoch
-            artworkInFlight.insert("\(epoch):\(key)")
-            perform(preview ? "preview_artwork" : "artwork", configure: { $0.token = id }) { result in
-                guard epoch == self.browserEpoch else { return }
-                if let text = result.image, let data = Data(base64Encoded: text), let image = NSImage(data: data) {
-                    self.images[key] = image
-                    self.imageOrder.removeAll { $0 == key }; self.imageOrder.append(key)
-                    while self.imageOrder.count > 128 {
-                        let oldest = self.imageOrder.removeFirst()
-                        self.images.removeValue(forKey: oldest); self.requestedArtwork.remove(oldest)
+        guard ready, connected, !busy, !closing, !browserPreparing else { return }
+        while artworkInFlight.count < 2 {
+            let key: String
+            let speculative: Bool
+            if !artworkPending.isEmpty {
+                key = artworkPending.removeFirst()
+                guard artworkDemand[key] != nil else { requestedArtwork.remove(key); continue }
+                speculative = false
+            } else {
+                // Never queue speculative device work behind unresolved visible requests.
+                guard browserReady, artworkInFlight.isEmpty, speculativeArtwork.isEmpty else { return }
+                while let first = artworkPrefetchPending.first, !artworkPrefetchRemaining.contains(first) {
+                    artworkPrefetchPending.removeFirst()
+                }
+                guard !artworkPrefetchPending.isEmpty else { return }
+                key = artworkPrefetchPending.removeFirst()
+                speculative = true
+            }
+            let epoch = browserEpoch, slot = "\(epoch):\(key)"
+            guard !artworkInFlight.contains(slot) else { continue }
+            artworkInFlight.insert(slot)
+            requestedArtwork.insert(key)
+            if speculative { speculativeArtwork.insert(slot) }
+            let namespace = key.hasPrefix("preview:") ? "" : state?.artworkCacheKey ?? ""
+            if namespace.isEmpty {
+                requestArtwork(key, epoch: epoch, namespace: namespace)
+            } else {
+                Task { [weak self, artworkCache] in
+                    let data = await artworkCache.read(namespace: namespace, id: key)
+                    guard let self else { return }
+                    guard self.browserEpoch == epoch, self.connected, !self.closing else {
+                        self.finishArtwork(key, epoch: epoch); self.dispatchArtwork(); return
                     }
+                    if let data {
+                        if self.artworkDemand[key] != nil { self.storeArtwork(data, key: key) }
+                        self.finishArtwork(key, epoch: epoch)
+                    } else if self.busy || (self.artworkDemand[key] == nil && !speculative) {
+                        self.artworkInFlight.remove(slot); self.speculativeArtwork.remove(slot)
+                        self.requestedArtwork.remove(key)
+                        if self.artworkDemand[key] != nil { self.artworkPending.insert(key, at: 0) }
+                        if self.artworkPrefetchRemaining.contains(key) { self.artworkPrefetchPending.insert(key, at: 0) }
+                    } else {
+                        self.requestArtwork(key, epoch: epoch, namespace: namespace)
+                    }
+                    self.dispatchArtwork()
                 }
             }
+        }
+    }
+
+    private func requestArtwork(_ key: String, epoch: Int, namespace: String) {
+        let preview = key.hasPrefix("preview:")
+        let id = preview ? String(key.dropFirst(8)) : key
+        perform(preview ? "preview_artwork" : "artwork", configure: { $0.token = id }) { result in
+            guard epoch == self.browserEpoch else { return }
+            guard let text = result.image, let data = Data(base64Encoded: text), NSImage(data: data) != nil else {
+                self.finishArtwork(key, epoch: epoch); return
+            }
+            if self.artworkDemand[key] != nil { self.storeArtwork(data, key: key) }
+            if namespace.isEmpty {
+                self.finishArtwork(key, epoch: epoch)
+            } else {
+                Task { [weak self, artworkCache = self.artworkCache] in
+                    await artworkCache.write(data, namespace: namespace, id: key)
+                    guard let self else { return }
+                    self.finishArtwork(key, epoch: epoch); self.dispatchArtwork()
+                }
+            }
+        }
+    }
+
+    private func finishArtwork(_ key: String, epoch: Int) {
+        artworkInFlight.remove("\(epoch):\(key)")
+        speculativeArtwork.remove("\(epoch):\(key)")
+        if epoch == browserEpoch { artworkPrefetchRemaining.remove(key) }
+    }
+
+    private func storeArtwork(_ data: Data, key: String) {
+        guard let image = NSImage(data: data) else { return }
+        images[key] = image
+        imageOrder.removeAll { $0 == key }; imageOrder.append(key)
+        while imageOrder.count > 128 {
+            let oldest = imageOrder.first { artworkDemand[$0] == nil } ?? imageOrder[0]
+            imageOrder.removeAll { $0 == oldest }
+            images.removeValue(forKey: oldest); requestedArtwork.remove(oldest)
         }
     }
 
@@ -446,11 +624,26 @@ final class AppModel: ObservableObject {
         panel.allowsMultipleSelection = true
         panel.begin { [weak self] response in
             guard response == .OK, let self else { return }
-            self.workspace = .incoming
-            self.saveEdits {
-                self.perform("preview", foreground: true, configure: { $0.paths = panel.urls.map(\.path) }) { result in
-                    self.loadQueue(first: result.preview ?? [], total: result.total ?? 0)
-                }
+            self.prepareImport(paths: panel.urls.map(\.path))
+        }
+    }
+
+    var canChangeAlacOriginalImport: Bool { ready && !busy && queue.isEmpty && !closing }
+
+    func setAlacOriginalImport(_ enabled: Bool) {
+        guard canChangeAlacOriginalImport else { return }
+        alacOriginalImport = enabled
+    }
+
+    func prepareImport(paths: [String]) {
+        guard writable, !paths.isEmpty else { return }
+        workspace = .incoming
+        let original = alacOriginalImport
+        saveEdits {
+            self.perform("preview", foreground: true, configure: {
+                $0.paths = paths; $0.allowHighResolutionAlac = original
+            }) { result in
+                self.loadQueue(first: result.preview ?? [], total: result.total ?? 0)
             }
         }
     }
@@ -554,7 +747,10 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var canReviewRemoval: Bool { writable && (state?.packageCount ?? 0) > 0 }
+
     func prepareRemoval() {
+        guard canReviewRemoval else { return }
         perform("prepare_delete", foreground: true, configure: { _ in }) { self.review = $0.review }
     }
 
@@ -565,6 +761,17 @@ final class AppModel: ObservableObject {
 
     func restore() {
         perform("restore", foreground: true, configure: { _ in }) { _ in self.refresh() }
+    }
+
+    func keepCurrentContents(_ expected: StateDTO) {
+        guard ready, !busy, state?.canKeepContents == true,
+              state?.generation == expected.generation,
+              state?.recoveryPath == expected.recoveryPath,
+              !expected.recoveryPath.isEmpty else { return }
+        let path = expected.recoveryPath
+        perform("keep", foreground: true, configure: { $0.token = path }) { _ in
+            self.review = nil
+        }
     }
 
     func eject() { perform("eject", foreground: true) }

@@ -2,6 +2,24 @@ import XCTest
 @testable import ClassicDropCore
 
 final class ProtocolTests: XCTestCase {
+    func testAudioFormatUsesActualPrecisionAndCompleteMixedSummaries() throws {
+        func facts(_ json: String) throws -> AudioFormatDTO {
+            try Wire.decoder.decode(AudioFormatDTO.self, from: Data(json.utf8))
+        }
+        let alac = try facts(#"{"id":"1","codec":"ALAC","bit_depth":24,"sample_rate_hz":96000,"detail":""}"#)
+        let aac = try facts(#"{"id":"2","codec":"AAC","bit_depth":null,"sample_rate_hz":44100,"detail":""}"#)
+        XCTAssertEqual(alac.bitDepthText, "24-bit")
+        XCTAssertEqual(aac.bitDepthText, "—")
+        XCTAssertEqual(aac.sampleRateText, "44.1 kHz")
+        XCTAssertNil(audioFormatSummary(ids: ["1", "2"], formats: ["1": alac], unknown: "Unknown"))
+        let summary = try XCTUnwrap(audioFormatSummary(ids: ["1", "2"], formats: ["1": alac, "2": aac], unknown: "Unknown"))
+        XCTAssertTrue(summary.contains("AAC / ALAC"))
+        XCTAssertTrue(summary.contains("24-bit / —"))
+        XCTAssertTrue(summary.contains("44.1 kHz / 96 kHz"))
+        let unknown = try facts(#"{"id":"3","codec":"","bit_depth":null,"sample_rate_hz":null,"detail":"broken"}"#)
+        XCTAssertTrue(try XCTUnwrap(audioFormatSummary(ids: ["1", "3"], formats: ["1": alac, "3": unknown], unknown: "Unknown")).contains("Unknown"))
+    }
+
     func testFramingHandlesSplitUnicodeAndMultipleLines() throws {
         var decoder = LineDecoder()
         let data = Data("{\"name\":\"夜曲\"}\n{\"ok\":true}\n".utf8)

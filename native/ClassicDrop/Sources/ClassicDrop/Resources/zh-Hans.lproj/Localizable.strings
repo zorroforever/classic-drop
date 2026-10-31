@@ -64,7 +64,7 @@
 "package.remove" = "移出清单";
 "package.review" = "复核移除…";
 "package.empty" = "先筛选并选择要移除的音乐";
-"removal.warning" = "从整个曲库及所有播放列表移除。原件保留在 iPod 上用于恢复，不会立即释放空间。移除后须先恢复，才能再次导入或移除。";
+"removal.warning" = "从整个曲库及所有播放列表移除。原件保留在 iPod 上用于恢复，不会立即释放空间。移除后请在恢复与记录中选择恢复，或保留当前结果后继续。";
 "removal.confirm" = "可恢复地移除";
 "removal.review" = "复核音乐移除";
 "recovery.size" = "保留用于恢复的媒体：%@";
@@ -77,7 +77,11 @@
 "recovery.none" = "当前没有可恢复的记录";
 "recovery.hint" = "这里显示原设备与本机记录支持的最近一次变更。恢复需要原 iPod 和恢复数据。";
 "recovery.location" = "恢复记录位置";
-"recovery.blocked" = "当前需要先恢复，再继续写入音乐。";
+"recovery.blocked" = "请先处理上次变更，再继续写入音乐。已完成的移除可以恢复，也可以保留当前结果并继续。";
+"keep" = "保留当前结果并继续";
+"keep.warning" = "保留当前 iPod 曲库及已完成的删除。此次及更早的变更将不再提供一键恢复；恢复文件仍保留在 iPod 上并占用空间。本次移除清单会保留，但不会自动执行。";
+"keep.summary" = "已保留当前曲库，可以继续复核移除清单";
+"operation.keep" = "正在保留当前结果";
 "helper.unavailable" = "无法连接内置工作进程，请从完整应用包启动。";
 "helper.stopped" = "工作进程已停止；设备状态和旧预览已失效。请重新连接并检查恢复。";
 "write.unknown" = "写入结果未知。请重新连接原 iPod 并检查恢复；不要重复提交。";
@@ -132,3 +136,17 @@
 "selection.count" = "已选 %d 首（包含隐藏选择）";
 "selection.clear" = "取消全部选择";
 "browser.incomplete" = "资料库缓存不完整，请刷新后重试。";
+
+"audio.codec" = "编码";
+"audio.bit_depth" = "位深";
+"audio.sample_rate" = "采样率";
+"audio.loading" = "读取音频格式…";
+"audio.unknown" = "未知";
+"audio.unavailable" = "无法读取音频格式";
+"audio.read" = "读取音频格式";
+"audio.disabled" = "音频格式读取已关闭，可在右上角更多菜单中开启。";
+
+"alac.original" = "ALAC 原样导入（不转换）";
+"alac.original.on" = "保留 ALAC 原文件的位深和采样率，播放兼容性由你测试；其他格式沿用原规则。";
+"alac.original.off" = "已关闭：ALAC 沿用当前兼容规则，超出限制时转换为 16-bit / 44.1 kHz ALAC。";
+"alac.original.locked" = "此选项已绑定待导入清单。需更改时先清空清单，再重新添加源文件。";

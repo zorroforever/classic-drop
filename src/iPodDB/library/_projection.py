@@ -166,6 +166,18 @@ def _project_ipod_details(
     )
 
 
+def _sample_rate(header: MhitHeader) -> int:
+    # The legacy 16.16 integer field saturates above 65535 Hz. Only in that
+    # representation does the existing floating-point companion carry the rate.
+    if (
+        header.sample_rate_1 == 0xFFFF0000
+        and 65535 < header.sample_rate_2 <= 0xFFFFFF
+        and header.sample_rate_2.is_integer()
+    ):
+        return int(header.sample_rate_2)
+    return fixed_to_sample_rate(header.sample_rate_1)
+
+
 def _project_metadata(
     header: MhitHeader,
     text: _TrackTextMetadata,
@@ -180,7 +192,7 @@ def _project_metadata(
         compilation=bool(header.compilation_flag),
         last_modified=_project_timestamp(header.last_modified, device_timezone),
         total_tracks=header.total_tracks,
-        sample_rate_hz=fixed_to_sample_rate(header.sample_rate_1),
+        sample_rate_hz=_sample_rate(header),
         volume_adjustment_percent=header.volume / 255 * 100,
         start_time_ms=header.start_time,
         stop_time_ms=header.stop_time,

@@ -64,7 +64,7 @@
 "package.remove" = "Remove from Package";
 "package.review" = "Review Removal…";
 "package.empty" = "Filter and select the songs to remove";
-"removal.warning" = "Remove from the entire Library and all Playlists. Original files remain on the iPod for recovery, so space will not be freed immediately. Restore this removal before importing or removing more music.";
+"removal.warning" = "Remove from the entire Library and all Playlists. Original files remain on the iPod for recovery, so space will not be freed immediately. In Recovery & History, restore this removal or keep the current result before continuing.";
 "removal.confirm" = "Recoverably Remove";
 "removal.review" = "Review Music Removal";
 "recovery.size" = "Media retained for recovery: %@";
@@ -77,7 +77,11 @@
 "recovery.none" = "No recoverable record is currently available";
 "recovery.hint" = "This page shows the latest change supported by the original device and local history. Restoration requires that iPod and its recovery data.";
 "recovery.location" = "Recovery Record Location";
-"recovery.blocked" = "Restore the previous change before writing more music.";
+"recovery.blocked" = "Resolve the previous change before writing more music. A completed removal can be restored or kept to continue.";
+"keep" = "Keep Current Result and Continue";
+"keep.warning" = "Keep the current iPod Library and completed removals. This and earlier changes will no longer offer one-click restore. Recovery files remain on the iPod and still occupy space. Your current removal package stays available and will not run automatically.";
+"keep.summary" = "Current Library kept; you can review the removal package";
+"operation.keep" = "Keeping Current Result";
 "helper.unavailable" = "Could not connect to the bundled worker. Launch the complete app bundle.";
 "helper.stopped" = "The worker stopped; device state and old previews have expired. Reconnect and check recovery.";
 "write.unknown" = "The write result is unknown. Reconnect the original iPod and check recovery; do not submit the operation again.";
@@ -132,3 +136,17 @@
 "selection.count" = "%d selected (including hidden selections)";
 "selection.clear" = "Clear selection";
 "browser.incomplete" = "The library cache is incomplete. Refresh to try again.";
+
+"audio.codec" = "Codec";
+"audio.bit_depth" = "Bit depth";
+"audio.sample_rate" = "Sample rate";
+"audio.loading" = "Reading audio format…";
+"audio.unknown" = "Unknown";
+"audio.unavailable" = "Audio format could not be read";
+"audio.read" = "Read audio formats";
+"audio.disabled" = "Audio format reading is off. Enable it in the More menu.";
+
+"alac.original" = "Import ALAC without conversion";
+"alac.original.on" = "Keep the original ALAC bit depth and sample rate. Playback support depends on your iPod; other formats follow the usual rules.";
+"alac.original.off" = "Off: ALAC follows the current compatibility rules; higher specifications are converted to 16-bit / 44.1 kHz ALAC.";
+"alac.original.locked" = "This option is fixed for the prepared queue. Clear the queue to change it, then add the source files again.";

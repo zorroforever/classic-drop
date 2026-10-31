@@ -46,6 +46,7 @@ class Request:
     playlists: tuple[str, ...] = ()
     source: str = ""
     version: int = VERSION
+    allow_high_resolution_alac: bool = False
 
     @classmethod
     def decode(cls, data: bytes) -> Request:
@@ -59,7 +60,10 @@ class Request:
             raise ValueError("Invalid command envelope")
         values: dict[str, Any] = {}
         for name, value in raw.items():
-            if name in {"offset", "limit", "version"}:
+            if name == "allow_high_resolution_alac":
+                if type(value) is not bool:
+                    raise ValueError("Invalid ALAC original import option")
+            elif name in {"offset", "limit", "version"}:
                 if type(value) is not int or value < 0:
                     raise ValueError(f"Invalid {name}")
             elif name == "edits":
@@ -182,6 +186,8 @@ class StateDTO:
     can_restore: bool
     writes_allowed: bool
     recovery_path: str
+    can_keep_contents: bool = False
+    artwork_cache_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +203,15 @@ class ReviewDTO:
 class FacetDTO:
     id: str
     name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AudioFormatDTO:
+    id: str
+    codec: str
+    bit_depth: int | None
+    sample_rate_hz: int | None
+    detail: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +231,7 @@ class Result:
     count: int = 0
     warnings: tuple[str, ...] = ()
     gui_application: bool = False
+    audio_formats: tuple[AudioFormatDTO, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

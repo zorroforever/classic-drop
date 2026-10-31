@@ -40,7 +40,14 @@ from iOpenPod.app.services.device_coordinator import (
     SyncRecoveryRestoredError,
 )
 from iPodDB.library import ArtworkPixels, LibrarySnapshot
-from storage import DevicePath, HostPath, PhysicalDeviceId, Storage, capture_host_file
+from storage import (
+    DevicePath,
+    HostPath,
+    PhysicalDeviceId,
+    Storage,
+    TransactionState,
+    capture_host_file,
+)
 
 
 class OperationCancelledError(Exception):
@@ -127,6 +134,7 @@ class ClassicDropEngine:
         self._resources = ExitStack()
         self._songs: dict[str, PreparedSong] = {}
         self._preview_active: ActiveIPod | None = None
+        self._preview_alac_original = False
         self.pending_recovery: str | None = None
         self._removal_review: RemovalReview | None = None
         self._entries: dict[Path, PreviewEntry] = {}
@@ -246,11 +254,19 @@ class ClassicDropEngine:
             )
 
     def preview(
-        self, paths: tuple[Path, ...], cancelled: Event
+        self,
+        paths: tuple[Path, ...],
+        cancelled: Event,
+        *,
+        allow_high_resolution_alac: bool = False,
     ) -> tuple[PreviewEntry, ...]:
         active = self.active
         if self._preview_active is not active:
             self.discard()
+        if self._entries and self._preview_alac_original != allow_high_resolution_alac:
+            raise ValueError(
+                "Clear the import queue before changing ALAC original import"
+            )
         self._preview_active = active
 
         def checkpoint() -> None:
@@ -284,6 +300,7 @@ class ClassicDropEngine:
                 device_root,
                 checkpoint,
                 batch,
+                allow_high_resolution_alac,
             )
 
     def _preview_sources(
@@ -296,6 +313,7 @@ class ClassicDropEngine:
         device_root: Path,
         checkpoint: Callable[[], None],
         batch: ExitStack,
+        allow_high_resolution_alac: bool,
     ) -> tuple[PreviewEntry, ...]:
         entries: list[PreviewEntry] = []
         songs: dict[str, PreparedSong] = {}
@@ -340,6 +358,7 @@ class ClassicDropEngine:
                         completed=index,
                         total=len(sources),
                     ),
+                    allow_high_resolution_alac=allow_high_resolution_alac,
                 )
                 song = prepared.song
                 sha = prepared.original.sha256
@@ -388,6 +407,7 @@ class ClassicDropEngine:
         self._resources.enter_context(batch.pop_all())
         self._songs.update(songs)
         self._entries = {entry.path: entry for entry in entries}
+        self._preview_alac_original = allow_high_resolution_alac
         return tuple(entries)
 
     def _media_progress(
@@ -786,6 +806,25 @@ class ClassicDropEngine:
             result.recovery_path,
         )
 
+    def keep_current_contents(self, recovery: str, cancelled: Event) -> None:
+        """Accept a completed removal in Host history, retaining device recovery data."""
+        self._checkpoint(cancelled)
+        if self.pending_recovery:
+            raise ValueError("An interrupted operation must be recovered first")
+        active, identity = self.active, self._identity()
+        if self.history.latest_operation(identity) != (recovery, "delete"):
+            raise ValueError("The recovery record changed; reload")
+        with self.coordinator.sync_session(active) as session:
+            if (
+                session.read_transaction_state(DevicePath(recovery))
+                is not TransactionState.COMMITTED
+            ):
+                raise ValueError("Only a completed removal can be kept")
+            self._checkpoint(cancelled)
+        # Complete the session's final identity/Library validation before accepting.
+        self.history.keep_current(identity, recovery)
+        self._removal_review = None
+
     def restore_last(self, cancelled: Event) -> ActiveIPod:
         self._checkpoint(cancelled)
         if self.pending_recovery:
@@ -833,6 +872,7 @@ class ClassicDropEngine:
         self._songs.clear()
         self._entries.clear()
         self._preview_active = None
+        self._preview_alac_original = False
 
     def close(self) -> None:
         self.discard()

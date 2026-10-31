@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftUI
 import ClassicDropCore
 @testable import ClassicDrop
 
@@ -14,17 +15,276 @@ final class StubConnection: HelperConnection {
         _ command: String,
         extra: String = "",
         revision: String = "r",
-        generation: String = "g"
+        generation: String = "g",
+        packageCount: Int = 0,
+        writesAllowed: Bool = true,
+        canKeepContents: Bool = false,
+        recoveryPath: String = "",
+        artworkCacheKey: String = ""
     ) throws {
         let request = try XCTUnwrap(requests.last { $0.command == command })
         let json = """
-        {"version":1,"id":"\(request.id)","event":"result","generation":"\(generation)","sequence":1,"code":"","detail":"","result":{"state":{"generation":"\(generation)","revision":"\(revision)","active_id":"device","active_name":"Synthetic iPod","available_bytes":100,"total_bytes":200,"track_count":2,"queue_count":1,"package_count":0,"can_restore":false,"writes_allowed":true,"recovery_path":""}\(extra)}}
+        {"version":1,"id":"\(request.id)","event":"result","generation":"\(generation)","sequence":1,"code":"","detail":"","result":{"state":{"generation":"\(generation)","revision":"\(revision)","active_id":"device","active_name":"Synthetic iPod","available_bytes":100,"total_bytes":200,"track_count":2,"queue_count":1,"package_count":\(packageCount),"can_restore":false,"writes_allowed":\(writesAllowed),"can_keep_contents":\(canKeepContents),"recovery_path":"\(recoveryPath)"}\(extra)}}
         """
-        onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(json.utf8)))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        var result = try XCTUnwrap(object["result"] as? [String: Any])
+        var state = try XCTUnwrap(result["state"] as? [String: Any])
+        state["artwork_cache_key"] = artworkCacheKey
+        result["state"] = state; object["result"] = result
+        onEvent?(try Wire.decoder.decode(Envelope.self, from: JSONSerialization.data(withJSONObject: object)))
     }
 }
 
 final class ModelTests: XCTestCase {
+    func testInspectorDetailWidthLeavesRoomForSystemInspector() {
+        for width: CGFloat in [940, 1180, 1440] {
+            let detail = InspectorLayout.detailColumnWidth(availableWidth: width)
+            XCTAssertLessThanOrEqual(detail + 250 + 360 + 2, width)
+        }
+    }
+
+    @MainActor
+    func testInspectorEligibilityTracksWorkspaceAndAlbumDetail() throws {
+        let (model, _) = try connected()
+
+        XCTAssertTrue(model.inspectorEligible)
+        model.workspace = .incoming
+        XCTAssertTrue(model.inspectorEligible)
+        model.workspace = .removal
+        XCTAssertFalse(model.inspectorEligible)
+        model.workspace = .recovery
+        XCTAssertFalse(model.inspectorEligible)
+
+        model.workspace = .library
+        model.openAlbum = try Wire.decoder.decode(
+            AlbumDTO.self,
+            from: Data(#"{"id":"album","title":"Album","artist":"Artist","year":2020,"track_count":1,"duration_ms":1000,"artwork_id":"1"}"#.utf8)
+        )
+        XCTAssertFalse(model.inspectorEligible)
+    }
+
+    @MainActor
+    func testKeepingCurrentContentsBindsRecoveryAndPreservesPackageForReview() throws {
+        let (model, connection) = try connected()
+        model.discover()
+        try connection.reply("discover", packageCount: 4, writesAllowed: false,
+                             canKeepContents: true, recoveryPath: ".iopenpod-recovery/current/transaction.json")
+        XCTAssertFalse(model.canReviewRemoval)
+
+        model.keepCurrentContents(try XCTUnwrap(model.state))
+
+        XCTAssertEqual(connection.requests.last?.command, "keep")
+        XCTAssertEqual(connection.requests.last?.token, ".iopenpod-recovery/current/transaction.json")
+        let count = connection.requests.count
+        try connection.reply("keep", packageCount: 4)
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertEqual(model.state?.packageCount, 4)
+        XCTAssertTrue(model.canReviewRemoval)
+        XCTAssertNil(model.review)
+    }
+
+    @MainActor
+    func testKeepConfirmationCannotApplyToAChangedDeviceGeneration() throws {
+        let (model, connection) = try connected()
+        model.discover()
+        try connection.reply("discover", writesAllowed: false, canKeepContents: true,
+                             recoveryPath: ".iopenpod-recovery/current/transaction.json")
+        let confirmed = try XCTUnwrap(model.state)
+        model.discover()
+        try connection.reply("discover", generation: "other", writesAllowed: false,
+                             canKeepContents: true, recoveryPath: ".iopenpod-recovery/current/transaction.json")
+        let count = connection.requests.count
+
+        model.keepCurrentContents(confirmed)
+
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertFalse(model.state?.writesAllowed ?? true)
+    }
+
+    @MainActor
+    func testAudioFormatsAreOffByDefaultAndEnableExistingVisibleDemand() throws {
+        let (model, connection) = try connected()
+        XCTAssertFalse(model.audioFormatReadingEnabled)
+        model.acquireAudioFormats(["visible", "hidden"])
+        model.releaseAudioFormats(["hidden"])
+        XCTAssertFalse(connection.requests.contains { $0.command == "audio_formats" })
+        model.artwork("cover")
+        XCTAssertEqual(connection.requests.last?.command, "artwork")
+
+        model.setAudioFormatReadingEnabled(true)
+
+        XCTAssertEqual(connection.requests.last { $0.command == "audio_formats" }?.ids, ["visible"])
+    }
+
+    @MainActor
+    func testDisablingAudioReadingCancelsAndIgnoresReplyBeforeResuming() throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.acquireAudioFormats(["first"])
+        let active = try XCTUnwrap(connection.requests.last { $0.command == "audio_formats" })
+        model.acquireAudioFormats(["next"])
+        model.setAudioFormatReadingEnabled(false)
+        XCTAssertEqual(connection.requests.last?.command, "cancel")
+        XCTAssertEqual(connection.requests.last?.token, active.id)
+        model.setAudioFormatReadingEnabled(true)
+        XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, 1)
+
+        try connection.reply("audio_formats", extra: #", "audio_formats":[{"id":"first","codec":"ALAC","bit_depth":24,"sample_rate_hz":96000,"detail":""}]"#)
+
+        XCTAssertNil(model.audioFormats["first"])
+        XCTAssertEqual(Set(connection.requests.last { $0.command == "audio_formats" }?.ids ?? []), ["first", "next"])
+        model.setAudioFormatReadingEnabled(false)
+        let count = connection.requests.filter { $0.command == "audio_formats" }.count
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "audio_formats" })
+        let error = """
+        {"version":1,"id":"\(request.id)","event":"error","generation":"g","sequence":1,"code":"cancelled","detail":"Canceled"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(error.utf8)))
+        XCTAssertTrue(model.audioFormats.isEmpty)
+        XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, count)
+        XCTAssertTrue(model.error.isEmpty)
+    }
+
+    @MainActor
+    func testAudioDemandIsBoundedCachesAndPreservesSelection() throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.selectedTracks = ["chosen"]
+        model.acquireAudioFormats((1...20).map(String.init))
+        XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, 1)
+        XCTAssertEqual(connection.requests.last?.ids?.count, 8)
+        model.releaseAudioFormats((9...19).map(String.init))
+        try connection.reply("audio_formats", extra: #", "audio_formats":[{"id":"1","codec":"ALAC","bit_depth":24,"sample_rate_hz":96000,"detail":""}]"#)
+        XCTAssertEqual(model.audioFormats["1"]?.sampleRateText, "96 kHz")
+        XCTAssertEqual(model.selectedTracks, ["chosen"])
+        XCTAssertEqual(connection.requests.last?.ids, ["20"])
+        try connection.reply("audio_formats")
+        let count = connection.requests.count
+        model.acquireAudioFormats(["1"])
+        XCTAssertEqual(connection.requests.count, count)
+    }
+
+    @MainActor
+    func testOldAudioReplyReleasesPhysicalSlotWithoutPublishing() throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.acquireAudioFormats(["1"])
+        model.select("new-device")
+        try connection.reply("select", generation: "g2")
+        try connection.reply("prepare_browser", generation: "g2")
+        try connection.reply("tracks", extra: #", "tracks":[],"total":0"#, generation: "g2")
+        try connection.reply("albums", extra: #", "albums":[],"total":0"#, generation: "g2")
+        model.acquireAudioFormats(["2"])
+        XCTAssertEqual(connection.requests.filter { $0.command == "audio_formats" }.count, 1)
+        try connection.reply("audio_formats", extra: #", "audio_formats":[{"id":"1","codec":"ALAC","bit_depth":24,"sample_rate_hz":96000,"detail":""}]"#)
+        XCTAssertNil(model.audioFormats["1"])
+        XCTAssertEqual(connection.requests.last?.ids, ["2"])
+    }
+
+    @MainActor
+    func testAudioFailureFreesSlotAndUnknownDoesNotRetry() throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.acquireAudioFormats(["1"])
+        model.acquireAudioFormats(["2"])
+        let failed = try XCTUnwrap(connection.requests.last { $0.command == "audio_formats" })
+        let json = """
+        {"version":1,"id":"\(failed.id)","event":"error","generation":"g","sequence":1,"code":"failed","detail":"Unreadable file"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(json.utf8)))
+        XCTAssertEqual(model.audioFormats["1"]?.codecText, "—")
+        XCTAssertEqual(connection.requests.last?.ids, ["2"])
+        XCTAssertTrue(model.error.isEmpty)
+        try connection.reply("audio_formats")
+        let count = connection.requests.count
+        model.acquireAudioFormats(["1"])
+        XCTAssertEqual(connection.requests.count, count)
+    }
+
+    @MainActor
+    func testAudioDemandWaitsForForegroundWorkThenResumes() throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.perform("validate", foreground: true)
+        let count = connection.requests.count
+        model.acquireAudioFormats(["1", "2"])
+        XCTAssertEqual(connection.requests.count, count)
+        try connection.reply("validate")
+        XCTAssertEqual(connection.requests.last?.command, "audio_formats")
+        XCTAssertEqual(connection.requests.last?.ids, ["1", "2"])
+    }
+
+    @MainActor
+    func testReusedInspectorCellTransfersDemandToNewTrack() async throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        model.perform("validate", foreground: true)
+        let target = InspectorTarget()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 80), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: InspectorHarness(target: target).environmentObject(model).environmentObject(model.strings))
+        window.orderFront(nil)
+        defer { window.close() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        target.id = "second"
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try connection.reply("validate")
+        XCTAssertEqual(connection.requests.last { $0.command == "audio_formats" }?.ids, ["second"])
+    }
+
+    @MainActor
+    func testNativeTableCellInheritsAudioDependencies() async throws {
+        let (model, connection) = try connected()
+        model.setAudioFormatReadingEnabled(true)
+        let track = try Wire.decoder.decode(TrackDTO.self, from: Data(#"{"id":"table-track","title":"First","artist":"A","album":"B","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":""}"#.utf8))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: TrackTable(tracks: [track], selection: .constant([])).environmentObject(model).environmentObject(model.strings))
+        window.orderFront(nil)
+        defer { window.close() }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(connection.requests.last { $0.command == "audio_formats" }?.ids, ["table-track"])
+    }
+
+    @MainActor
+    func testAlacOriginalOptionIsOffByDefaultAndBoundToPreview() throws {
+        let (model, connection) = try connected()
+        XCTAssertFalse(model.alacOriginalImport)
+        model.setAlacOriginalImport(true)
+        model.prepareImport(paths: ["/Synthetic/hires.m4a"])
+        XCTAssertEqual(connection.requests.last?.allowHighResolutionAlac, true)
+        XCTAssertTrue(model.busy)
+        model.setAlacOriginalImport(false)
+        XCTAssertTrue(model.alacOriginalImport)
+        let entry = #"{"token":"p","path":"/Synthetic/hires.m4a","title":"Original","artist":"A","album":"B","album_artist":"A","track_number":1,"disc_number":1,"selected":true,"status":"new","mode":"copy","length_ms":1000,"size_bytes":100,"detail":"","has_artwork":false}"#
+        try connection.reply("preview", extra: ",\"preview\":[\(entry)],\"total\":1")
+        XCTAssertFalse(model.canChangeAlacOriginalImport)
+        model.setAlacOriginalImport(false)
+        XCTAssertTrue(model.alacOriginalImport)
+        model.discard()
+        try connection.reply("discard")
+        XCTAssertTrue(model.canChangeAlacOriginalImport)
+        model.setAlacOriginalImport(false)
+        model.prepareImport(paths: ["/Synthetic/hires.m4a"])
+        XCTAssertEqual(connection.requests.last?.allowHighResolutionAlac, false)
+    }
+
+    @MainActor
+    func testAlacOriginalOptionResetsOnDeviceChangeAndHelperLoss() throws {
+        let (model, connection) = try connected()
+        model.setAlacOriginalImport(true)
+        model.discover()
+        try connection.reply("discover", generation: "new-device")
+        XCTAssertFalse(model.alacOriginalImport)
+        try connection.reply("prepare_browser", generation: "new-device")
+        try connection.reply("tracks", extra: #", "tracks":[],"total":0"#, generation: "new-device")
+        try connection.reply("albums", extra: #", "albums":[],"total":0"#, generation: "new-device")
+        model.setAlacOriginalImport(true)
+        XCTAssertTrue(model.alacOriginalImport)
+        connection.onExit?(1)
+        XCTAssertFalse(model.alacOriginalImport)
+    }
+
     @MainActor
     func connected(prepare: Bool = true) throws -> (AppModel, StubConnection) {
         let connection = StubConnection()
@@ -197,4 +457,58 @@ final class ModelTests: XCTestCase {
         XCTAssertFalse(model.error.isEmpty)
     }
 
+    @MainActor
+    func testSelectedAlbumAddsAllItsMusicDespiteSearchAndOtherTrackSelection() throws {
+        let (model, connection) = try connected(prepare: false)
+        try connection.reply("prepare_browser")
+        try connection.reply("albums", extra: #", "albums":[{"id":"b","title":"Album","artist":"Artist","year":2020,"track_count":3,"duration_ms":3000,"artwork_id":"0"}],"total":1"#)
+        try connection.reply("tracks", extra: #", "tracks":[{"id":"1","title":"First","artist":"A","album":"Album","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"music"},{"id":"2","title":"Second","artist":"A","album":"Album","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"music"},{"id":"3","title":"Episode","artist":"A","album":"Album","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"podcast"},{"id":"4","title":"Other","artist":"A","album":"Album","album_artist":"A","album_id":"other","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1000,"size_bytes":100,"artwork_id":"0","source":"","media_kind":"music"}],"total":4"#)
+        let album = try XCTUnwrap(model.albums.first)
+        model.selectedTracks = ["4"]
+        model.query = "First"
+        model.loadTracks()
+        model.selectAlbum(album)
+
+        XCTAssertEqual(model.tracks.map(\.id), ["1"])
+        XCTAssertEqual(model.selectedTracks, ["1", "2"])
+        model.addLibrarySelection()
+
+        XCTAssertEqual(model.selectedMusicCount, 2)
+        XCTAssertEqual(connection.requests.last?.command, "package_add")
+        XCTAssertEqual(connection.requests.last?.ids, ["1", "2"])
+    }
+
+    @MainActor
+    func testRemovalReviewRequiresNonemptyPackageAndWriteEligibility() throws {
+        let (model, connection) = try connected()
+        let before = connection.requests.count
+
+        model.prepareRemoval()
+        XCTAssertEqual(connection.requests.count, before)
+
+        model.loadPackage()
+        try connection.reply("package", packageCount: 2, writesAllowed: false)
+        let readOnlyCount = connection.requests.count
+        model.prepareRemoval()
+        XCTAssertEqual(connection.requests.count, readOnlyCount)
+
+        model.loadPackage()
+        try connection.reply("package", packageCount: 2)
+        model.prepareRemoval()
+        XCTAssertEqual(connection.requests.last?.command, "prepare_delete")
+        XCTAssertFalse(connection.requests.contains { $0.command == "delete" })
+    }
+
+}
+
+@MainActor
+private final class InspectorTarget: ObservableObject {
+    @Published var id = "first"
+}
+
+private struct InspectorHarness: View {
+    @ObservedObject var target: InspectorTarget
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var strings: Strings
+    var body: some View { TrackCodecCell(trackID: target.id, model: model, strings: strings) }
 }

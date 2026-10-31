@@ -54,6 +54,7 @@ public struct RequestDTO: Encodable {
     public var years: [Int?]?
     public var playlists: [String]?
     public var source: String?
+    public var allowHighResolutionAlac: Bool?
     public init(_ command: String, generation: String = "") {
         self.command = command
         self.generation = generation
@@ -119,6 +120,8 @@ public struct StateDTO: Decodable {
     public let trackCount, queueCount, packageCount: Int
     public let canRestore, writesAllowed: Bool
     public let recoveryPath: String
+    public let canKeepContents: Bool?
+    public let artworkCacheKey: String?
 }
 
 public struct ReviewDTO: Decodable, Identifiable {
@@ -148,6 +151,7 @@ public struct ResultDTO: Decodable {
     public let image: String?
     public let warnings: [String]?
     public let guiApplication: Bool?
+    public let audioFormats: [AudioFormatDTO]?
 }
 
 public struct ProgressDTO: Decodable {

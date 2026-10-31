@@ -56,6 +56,12 @@ struct RemovalView: View {
             }
             TrackTable(tracks: model.package, selection: $model.selectedPackage, showSource: true).frame(minHeight: 110)
             Text(t("removal.warning")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button(t("package.review")) { model.prepareRemoval() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canReviewRemoval)
+            }
         }.padding(18)
             .onChange(of: model.genreFilter) { _ in model.filter() }
             .onChange(of: model.yearFilter) { _ in model.filter() }
@@ -109,22 +115,45 @@ struct RemovalReviewView: View {
 struct RecoveryView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
+    @State private var confirmingKeep = false
+    @State private var keepState: StateDTO?
     private func t(_ key: String) -> String { strings.text(key) }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                Label(t("recovery"), systemImage: "clock.arrow.circlepath").font(.title2.bold())
+        Form {
+            Section {
                 Text(t("recovery.hint")).foregroundStyle(.secondary)
-                if model.state?.canRestore == true {
-                    Divider()
+            } header: {
+                Label(t("recovery"), systemImage: "clock.arrow.circlepath")
+            }
+            if model.state?.canRestore == true {
+                Section {
                     if model.state?.writesAllowed == false { Text(t("recovery.blocked")).font(.headline) }
-                    Text(t("recovery.location")).font(.caption).foregroundStyle(.secondary)
-                    Text(model.state?.recoveryPath ?? "").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Text(model.state?.recoveryPath ?? "")
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
                     Button(t("restore")) { model.restore() }.disabled(!model.ready || model.busy)
-                } else {
-                    Label(t("recovery.none"), systemImage: "checkmark.circle").padding(.vertical, 24).foregroundStyle(.secondary)
+                    if model.state?.canKeepContents == true {
+                        Button(t("keep")) {
+                            keepState = model.state; confirmingKeep = true
+                        }.disabled(!model.ready || model.busy)
+                    }
+                } header: {
+                    Text(t("recovery.location"))
                 }
-            }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Section {
+                    Label(t("recovery.none"), systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .alert(t("keep"), isPresented: $confirmingKeep) {
+            Button(t("cancel"), role: .cancel) {}
+            Button(t("keep")) {
+                if let expected = keepState { model.keepCurrentContents(expected) }
+            }
+        } message: {
+            Text(t("keep.warning"))
         }
     }
 }
