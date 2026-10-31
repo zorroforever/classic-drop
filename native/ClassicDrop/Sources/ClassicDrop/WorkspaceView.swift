@@ -261,7 +261,9 @@ struct EmptyWorkspace<Action: View>: View {
 }
 
 struct CoverView: View {
-    @EnvironmentObject var model: AppModel
+    // Native Table may detach and reuse cell hosting views during row updates.
+    // Keep the dependency explicit so retained artwork cells never lose it.
+    @ObservedObject var model: AppModel
     var id: String
     var preview = false
     var radius: CGFloat = 12

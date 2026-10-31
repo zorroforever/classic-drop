@@ -130,7 +130,7 @@ struct InspectorView: View {
     }
     private func identity(artworkID: String, title: String, artist: String) -> some View {
         VStack(alignment: .center, spacing: 10) {
-            CoverView(id: artworkID).frame(maxWidth: 260)
+            CoverView(model: model, id: artworkID).frame(maxWidth: 260)
             Text(title).font(.title2.bold()).textSelection(.enabled)
                 .multilineTextAlignment(.center).frame(maxWidth: .infinity)
             Text(artist).foregroundStyle(.secondary)
@@ -145,7 +145,7 @@ struct InspectorView: View {
     private func preview(_ entry: PreviewDTO) -> some View {
         Group {
             Section {
-                CoverView(id: entry.token, preview: true).frame(maxWidth: .infinity)
+                CoverView(model: model, id: entry.token, preview: true).frame(maxWidth: .infinity)
             }
             Section {
                 ForEach(["title", "artist", "album", "album.artist"], id: \.self) { key in

@@ -157,7 +157,7 @@ struct PlaylistView: View {
                 TableColumn("#", value: \.index) { entry in Text("\(entry.index + 1)").monospacedDigit() }.width(45)
                 TableColumn(t("title"), value: \.sortTitle) { entry in
                     HStack {
-                        if let track = entry.track { CoverView(id: track.artworkId, radius: 3).frame(width: 26, height: 26) }
+                        if let track = entry.track { CoverView(model: model, id: track.artworkId, radius: 3).frame(width: 26, height: 26) }
                         Text(entry.track?.title ?? t("playlist.missing"))
                     }
                     .onDrag { NSItemProvider(object: ("entries:" + entry.id) as NSString) }

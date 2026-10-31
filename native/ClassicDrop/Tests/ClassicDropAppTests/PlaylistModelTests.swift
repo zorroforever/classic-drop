@@ -238,4 +238,30 @@ final class PlaylistModelTests: XCTestCase {
         XCTAssertEqual(replies, [true])
     }
 
+    @MainActor func testHostedPlaylistTableSurvivesRemovingRepeatedArtworkOccurrence() async throws {
+        let (model, connection) = try connected()
+        model.workspace = .playlist
+        let first = #"{"entry_id":"first","track_id":"1","index":0,"position":0,"missing_reference":false,"track":{"id":"1","title":"Repeated","artist":"A","album":"B","album_artist":"A","length_ms":1000,"artwork_id":"11"}}"#
+        let middle = first.replacingOccurrences(of: "first", with: "middle").replacingOccurrences(of: "Repeated", with: "Middle")
+        let last = first.replacingOccurrences(of: "first", with: "last")
+        model.playlistEntries = try Wire.decoder.decode([PlaylistEntryDTO].self, from: Data("[\(first),\(middle),\(last)]".utf8))
+        model.playlistEntriesComplete = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: PlaylistView().environmentObject(model).environmentObject(model.strings))
+        window.orderFront(nil)
+        defer { window.close() }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        model.selectedEntries = ["last"]; model.changeEntries("remove_entries")
+        try connection.reply("playlist_edit", extra: draft.replacingOccurrences(of: "p1", with: "p2"))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try connection.reply("playlist_entries", extra: draft.replacingOccurrences(of: "p1", with: "p2") + ",\"playlist_entries\":[\(first),\(middle)],\"total\":2")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["first", "middle"])
+        XCTAssertEqual(model.workspace, .playlist)
+        XCTAssertTrue(connection.requests.contains { $0.command == "artwork" && $0.token == "11" })
+        window.contentView = nil
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+
 }

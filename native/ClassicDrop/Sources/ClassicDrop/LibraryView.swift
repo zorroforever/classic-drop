@@ -58,7 +58,7 @@ struct LibraryView: View {
                             model.selectAlbum(album)
                         } label: {
                             VStack(alignment: .leading, spacing: 7) {
-                                CoverView(id: album.artworkId)
+                                CoverView(model: model, id: album.artworkId)
                                 Text(album.title.isEmpty ? t("album.unknown") : album.title)
                                     .font(.headline).lineLimit(1).foregroundStyle(.primary)
                                 Text(album.artist.isEmpty ? t("artist.unknown") : album.artist)
@@ -87,7 +87,7 @@ struct LibraryView: View {
                 Text(t("library") + " / " + album.artist + " / " + album.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             HStack(alignment: .center, spacing: 24) {
-                CoverView(id: album.artworkId).frame(width: 140)
+                CoverView(model: model, id: album.artworkId).frame(width: 140)
                 VStack(alignment: .leading, spacing: 10) {
                     Text(album.title).font(.system(size: 30, weight: .bold)).lineLimit(2)
                     Text(album.artist).font(.title3).foregroundStyle(.secondary)
