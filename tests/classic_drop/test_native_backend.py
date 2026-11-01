@@ -36,7 +36,7 @@ def call(backend: NativeBackend, command: str, **kwargs: Any) -> Result:
     )
 
 
-def test_artwork_cache_namespace_survives_restart_and_invalidates_database_changes(
+def test_artwork_cache_namespace_reuses_covers_after_library_only_changes(
     backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     key = backend.state().artwork_cache_key
@@ -49,7 +49,7 @@ def test_artwork_cache_namespace_survives_restart_and_invalidates_database_chang
     monkeypatch.setattr(
         connection, "active_ipod", replace(active, database_fingerprint=changed)
     )
-    assert backend.state().artwork_cache_key != key
+    assert backend.state().artwork_cache_key == key
     monkeypatch.setattr(
         connection, "active_ipod", replace(active, artwork_database_fingerprint=changed)
     )

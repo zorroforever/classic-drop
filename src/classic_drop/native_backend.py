@@ -191,22 +191,21 @@ class NativeBackend:
             recovery,
             can_keep,
             self._artwork_cache_key(active),
+            self._artwork_cache_key(active, legacy=True),
         )
 
-    def _artwork_cache_key(self, active: ActiveIPod | None) -> str:
+    def _artwork_cache_key(
+        self, active: ActiveIPod | None, *, legacy: bool = False
+    ) -> str:
         volume = self.engine.coordinator.active_volume_id
         if active is None or volume is None:
             return ""
         artwork = active.artwork_database_fingerprint
-        source = json.dumps(
-            [
-                "native-artwork-v1-320",
-                volume.value,
-                active.database_fingerprint.sha256,
-                artwork.sha256 if artwork is not None else "none",
-            ],
-            separators=(",", ":"),
-        )
+        parts = ["native-artwork-v1-320", volume.value]
+        if legacy:
+            parts.append(active.database_fingerprint.sha256)
+        parts.append(artwork.sha256 if artwork is not None else "none")
+        source = json.dumps(parts, separators=(",", ":"))
         return hashlib.sha256(source.encode()).hexdigest()
 
     def _result(

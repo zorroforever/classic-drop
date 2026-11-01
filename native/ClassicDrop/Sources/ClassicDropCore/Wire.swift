@@ -130,6 +130,7 @@ public struct StateDTO: Decodable {
     public let recoveryPath: String
     public let canKeepContents: Bool?
     public let artworkCacheKey: String?
+    public let artworkCacheLegacyKey: String?
 }
 
 public struct ReviewDTO: Decodable, Identifiable {

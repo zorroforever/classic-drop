@@ -20,7 +20,8 @@ final class StubConnection: HelperConnection {
         writesAllowed: Bool = true,
         canKeepContents: Bool = false,
         recoveryPath: String = "",
-        artworkCacheKey: String = ""
+        artworkCacheKey: String = "",
+        artworkCacheLegacyKey: String = ""
     ) throws {
         let request = try XCTUnwrap(requests.last { $0.command == command })
         let json = """
@@ -30,6 +31,7 @@ final class StubConnection: HelperConnection {
         var result = try XCTUnwrap(object["result"] as? [String: Any])
         var state = try XCTUnwrap(result["state"] as? [String: Any])
         state["artwork_cache_key"] = artworkCacheKey
+        state["artwork_cache_legacy_key"] = artworkCacheLegacyKey
         result["state"] = state; object["result"] = result
         onEvent?(try Wire.decoder.decode(Envelope.self, from: JSONSerialization.data(withJSONObject: object)))
     }

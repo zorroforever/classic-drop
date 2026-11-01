@@ -236,6 +236,7 @@ class StateDTO:
     recovery_path: str
     can_keep_contents: bool = False
     artwork_cache_key: str = ""
+    artwork_cache_legacy_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)

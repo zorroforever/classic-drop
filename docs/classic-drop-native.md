@@ -89,6 +89,12 @@ draft/Review authority; an interrupted save is never replayed automatically.
 
 ## Build
 
+Library covers use a bounded Host disk cache. Reconnecting or changing only
+Playlists, tags, or playback statistics reuses cached images when ArtworkDB is
+unchanged. Visible cached covers load independently of slow iPod reads and device
+workflows. An ArtworkDB change still requires a new cache fill. Existing cache
+entries for the exact current Library migrate on demand without device reads.
+
 Requirements: macOS, Apple's Swift toolchain with the macOS 26 SDK, UV and the
 repository's locked Python 3.12 environment. Xcode is needed for XCTest; ordinary
 app compilation can use the Command Line Tools. No third-party Swift packages
