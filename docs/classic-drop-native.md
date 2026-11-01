@@ -11,6 +11,11 @@ system GroupBox. The album grid and dense Library/removal Tables remain content
 views. The retained Qt entry remains available for comparison. Do not run both
 against one iPod.
 
+The system workspace column fills the available width as the Inspector opens or
+closes. Do not pin its width or duplicate the window's minimum width in the SwiftUI
+root: native column sizing can otherwise center the navigation area or enlarge the
+window when the Inspector opens. `WindowSetup` owns the window's minimum size.
+
 ## Playlists
 
 Playlist management follows [ADR-0186](adr/0186-manage-classic-drop-playlist-drafts.md).

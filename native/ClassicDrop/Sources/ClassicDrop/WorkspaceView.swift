@@ -3,16 +3,9 @@ import AppKit
 import ClassicDropCore
 
 enum InspectorLayout {
-    static let minimumDetailWidth: CGFloat = 320
-    static let preferredDetailWidth: CGFloat = 640
     static let minimumInspectorWidth: CGFloat = 300
     static let idealInspectorWidth: CGFloat = 340
     static let maximumInspectorWidth: CGFloat = 360
-    static let maximumSidebarWidth: CGFloat = 250
-
-    static func detailColumnWidth(availableWidth: CGFloat) -> CGFloat {
-        min(preferredDetailWidth, max(minimumDetailWidth, availableWidth - maximumSidebarWidth - maximumInspectorWidth - 2))
-    }
 }
 
 struct WorkspaceView: View {
@@ -25,7 +18,9 @@ struct WorkspaceView: View {
         GeometryReader { geometry in
             workspaceShell(for: geometry)
         }
-        .frame(minWidth: 940, minHeight: 580)
+        // WindowSetup owns the window minimum; a SwiftUI minimum here is also
+        // applied to the main column, making Inspector presentation widen the window.
+        .frame(minHeight: 580)
         .background(WindowSetup())
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -109,10 +104,7 @@ struct WorkspaceView: View {
                 detailColumn(
                     manualInspector: false,
                     inspectorWidth: InspectorLayout.idealInspectorWidth,
-                    minimumWidth: InspectorLayout.minimumDetailWidth
-                )
-                .navigationSplitViewColumnWidth(
-                    InspectorLayout.detailColumnWidth(availableWidth: geometry.size.width)
+                    minimumWidth: 0
                 )
             }
             .navigationSplitViewStyle(.balanced)
