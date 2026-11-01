@@ -13,7 +13,7 @@ final class ArtworkPrefetchTests: XCTestCase {
         XCTFail("Artwork queue did not reach expected state")
     }
 
-    private func library(ids: [String], cache: any ArtworkCaching) throws -> (AppModel, StubConnection) {
+    private func library(ids: [String], cache: any ArtworkCaching, legacy: String = "") throws -> (AppModel, StubConnection) {
         let connection = StubConnection()
         let model = AppModel(client: connection, artworkCache: cache)
         model.start()
@@ -26,7 +26,7 @@ final class ArtworkPrefetchTests: XCTestCase {
             {"id":"\(index)","title":"Track","artist":"A","album":"B","album_artist":"A","album_id":"b","genre":"","year":0,"track_number":1,"disc_number":1,"length_ms":1,"size_bytes":1,"artwork_id":"\(id)","source":""}
             """
         }.joined(separator: ",")
-        try connection.reply("tracks", extra: ",\"tracks\":[\(rows)],\"total\":\(ids.count)", artworkCacheKey: "namespace")
+        try connection.reply("tracks", extra: ",\"tracks\":[\(rows)],\"total\":\(ids.count)", artworkCacheKey: "namespace", artworkCacheLegacyKey: legacy)
         return (model, connection)
     }
 
@@ -78,6 +78,74 @@ final class ArtworkPrefetchTests: XCTestCase {
         XCTAssertEqual(connection.requests.filter { $0.command == "artwork" }[1].token, "3")
     }
 
+    func testVisibleDiskHitDoesNotWaitForTwoSlowDeviceReads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = ArtworkDiskCache(root: root)
+        await cache.write(try thumbnail(), namespace: "namespace", id: "3")
+        let (model, connection) = try library(ids: ["1", "2", "3"], cache: cache)
+        try await waitFor { connection.requests.contains { $0.command == "artwork" } }
+        model.artwork("2")
+        try await waitFor { connection.requests.filter { $0.command == "artwork" }.count == 2 }
+
+        model.artwork("3")
+
+        try await waitFor { model.images["3"] != nil }
+        XCTAssertEqual(connection.requests.filter { $0.command == "artwork" }.map(\.token), ["1", "2"])
+    }
+
+    func testVisibleDiskHitCanDisplayDuringForegroundWork() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = ArtworkDiskCache(root: root)
+        await cache.write(try thumbnail(), namespace: "namespace", id: "2")
+        let (model, connection) = try library(ids: ["1", "2"], cache: cache)
+        model.perform("validate", foreground: true)
+
+        model.artwork("2")
+
+        try await waitFor { model.images["2"] != nil }
+        XCTAssertTrue(model.busy)
+        XCTAssertFalse(connection.requests.contains { $0.command == "artwork" && $0.token == "2" })
+    }
+
+    func testExistingCacheMigratesWithoutReadingTheDevice() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = ArtworkDiskCache(root: root)
+        let data = try thumbnail()
+        await cache.write(data, namespace: "old-library-key", id: "1")
+        let (model, connection) = try library(ids: [], cache: cache, legacy: "old-library-key")
+
+        model.artwork("1")
+
+        try await waitFor { model.images["1"] != nil }
+        let migrated = await cache.read(namespace: "namespace", id: "1")
+        XCTAssertEqual(migrated, data)
+        XCTAssertFalse(connection.requests.contains { $0.command == "artwork" })
+    }
+
+    func testVisibleHostCacheLookupsStayBoundedWithoutUsingDeviceSlots() async throws {
+        let cache = GatedArtworkCache()
+        let (model, connection) = try library(ids: [], cache: cache)
+        for id in 1...12 { model.artwork(String(id)) }
+        for _ in 0..<1000 {
+            if await cache.pendingCount >= 8 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let pending = await cache.pendingCount
+        XCTAssertEqual(pending, 8)
+        let data = try thumbnail()
+        for _ in 0..<1000 {
+            await cache.resumePending(with: data)
+            if model.images.count == 12 { break }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTAssertEqual(model.images.count, 12)
+        XCTAssertFalse(connection.requests.contains { $0.command == "artwork" })
+    }
+
     func testDeviceChangeDiscardsLateArtworkAndStopsOldQueue() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -95,7 +163,8 @@ final class ArtworkPrefetchTests: XCTestCase {
         for disconnect in [false, true] {
             for data: Data? in [nil, try thumbnail()] {
                 let cache = SuspendedArtworkCache()
-                let (model, connection) = try library(ids: ["1", "2"], cache: cache)
+                let (model, connection) = try library(ids: [], cache: cache)
+                model.artwork("1")
                 for _ in 0..<1000 {
                     if await cache.hasPending { break }
                     try await Task.sleep(nanoseconds: 2_000_000)
@@ -125,5 +194,18 @@ private actor SuspendedArtworkCache: ArtworkCaching {
     func write(_ data: Data, namespace: String, id: String) {}
     func resume(with data: Data?) {
         continuation?.resume(returning: data); continuation = nil
+    }
+}
+
+private actor GatedArtworkCache: ArtworkCaching {
+    private var pending: [CheckedContinuation<Data?, Never>] = []
+    var pendingCount: Int { pending.count }
+    func read(namespace: String, id: String) async -> Data? {
+        await withCheckedContinuation { pending.append($0) }
+    }
+    func write(_ data: Data, namespace: String, id: String) {}
+    func resumePending(with data: Data) {
+        let reads = pending; pending = []
+        for read in reads { read.resume(returning: data) }
     }
 }

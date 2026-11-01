@@ -61,8 +61,10 @@ struct WorkspaceView: View {
         }
         .sheet(item: $model.review) { RemovalReviewView(review: $0) }
         .sheet(item: $model.playlistEditor) { PlaylistEditor(context: $0) }
-        .sheet(isPresented: Binding(get: { model.playlistReview != nil || model.pendingLifecycle != nil }, set: {
-            if !$0 { model.invalidatePlaylistReview(); model.cancelLifecycle() }
+        .sheet(isPresented: Binding(get: { !model.savingPlaylistReview && (model.playlistReview != nil || model.pendingLifecycle != nil) }, set: {
+            // Saving hands off to TaskPanel; it must retain the submitted Review
+            // and any pending lifecycle action until the helper replies.
+            if !$0 && !model.savingPlaylistReview { model.invalidatePlaylistReview(); model.cancelLifecycle() }
         })) {
             if let review = model.playlistReview { PlaylistReviewView(review: review) }
             else { PlaylistLifecycleView() }

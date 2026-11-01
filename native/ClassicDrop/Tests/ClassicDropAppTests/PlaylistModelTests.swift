@@ -93,6 +93,96 @@ final class PlaylistModelTests: XCTestCase {
         XCTAssertEqual(model.selectedPlaylist, "18446744073709551615")
         XCTAssertEqual(connection.requests.last?.command, "eject")
     }
+    @MainActor func testCombinedImportReviewHandsOffToSaveProgressAndStaysClosedAfterSuccess() async throws {
+        let (model, connection) = try connected()
+        model.workspace = .incoming
+        let window = reviewWindow(model)
+        defer { window.contentView = nil; window.close() }
+
+        model.preparePlaylistReview(includeImports: true)
+        let importReview = #"{"token":"review","operation":"import","added":500,"reused":0,"no_changes":false,"change_count":0,"changes":[]}"#
+        try connection.reply("playlist_prepare", extra: draft + ",\"playlist_review\":\(importReview)")
+        try await waitForReviewSheet(window, presented: true)
+
+        model.savePlaylistReview()
+        try await waitForReviewSheet(window, presented: false)
+        XCTAssertNotNil(model.playlistReview, "Dismissing the sheet must retain the submitted Review until the save completes")
+        XCTAssertTrue(model.busy)
+        try connection.reply("playlist_save", extra: #", "playlist_draft":{"revision":"p2","dirty":false,"can_undo":false,"can_redo":false,"locked":false,"changed_ids":[],"deleted_ids":[]}"#, generation: "g2")
+        try await waitForReviewSheet(window, presented: false)
+
+        XCTAssertNil(model.playlistReview)
+        XCTAssertTrue(model.browserPreparing)
+        XCTAssertNil(window.attachedSheet, "A successful import must close Review without a manual Cancel, even while the Library refresh is running")
+    }
+    @MainActor func testFailedPlaylistSaveShowsReviewAgainWithoutCancellingPendingClose() async throws {
+        let (model, connection) = try connected()
+        var terminationReplies: [Bool] = []
+        model.terminationReply = { terminationReplies.append($0) }
+        let window = reviewWindow(model)
+        defer { window.contentView = nil; window.close() }
+        model.requestClose()
+        model.preparePlaylistReview()
+        try connection.reply("playlist_prepare", extra: draft + ",\"playlist_review\":\(review)")
+        try await waitForReviewSheet(window, presented: true)
+
+        model.savePlaylistReview()
+        try await waitForReviewSheet(window, presented: false)
+        XCTAssertNotNil(model.pendingLifecycle)
+        XCTAssertTrue(terminationReplies.isEmpty)
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "playlist_save" })
+        let failure = """
+        {"version":1,"id":"\(request.id)","event":"error","generation":"g","sequence":1,"code":"failed","detail":"Source changed; review again"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(failure.utf8)))
+        try await waitForReviewSheet(window, presented: true)
+
+        XCTAssertFalse(model.busy)
+        XCTAssertEqual(model.error, "Source changed; review again")
+        XCTAssertNotNil(model.pendingLifecycle)
+        XCTAssertTrue(terminationReplies.isEmpty)
+        XCTAssertEqual(connection.requests.filter { $0.command == "playlist_save" }.count, 1)
+        model.invalidatePlaylistReview(); model.cancelLifecycle()
+        XCTAssertEqual(terminationReplies, [false])
+        model.error = ""
+        try await waitForReviewSheet(window, presented: false)
+    }
+    @MainActor private func reviewWindow(_ model: AppModel) -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: WorkspaceView().environmentObject(model).environmentObject(model.strings))
+        window.orderFront(nil)
+        return window
+    }
+    @MainActor func testImmediatePlaylistSaveFailureKeepsReviewVisible() async throws {
+        let (model, connection) = try connected()
+        let window = reviewWindow(model)
+        defer { window.contentView = nil; window.close() }
+        model.preparePlaylistReview()
+        try connection.reply("playlist_prepare", extra: draft + ",\"playlist_review\":\(review)")
+        try await waitForReviewSheet(window, presented: true)
+
+        model.savePlaylistReview()
+        let request = try XCTUnwrap(connection.requests.last { $0.command == "playlist_save" })
+        let failure = """
+        {"version":1,"id":"\(request.id)","event":"error","generation":"g","sequence":1,"code":"failed","detail":"Source changed; review again"}
+        """
+        connection.onEvent?(try Wire.decoder.decode(Envelope.self, from: Data(failure.utf8)))
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertNotNil(window.attachedSheet)
+        XCTAssertEqual(model.playlistReview?.token, "review")
+        XCTAssertEqual(model.error, "Source changed; review again")
+        XCTAssertFalse(model.busy)
+        XCTAssertEqual(connection.requests.filter { $0.command == "playlist_save" }.count, 1)
+    }
+    @MainActor private func waitForReviewSheet(_ window: NSWindow, presented: Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        for _ in 0..<100 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            if (window.attachedSheet != nil) == presented { return }
+        }
+        XCTFail(presented ? "Review sheet did not open" : "Review sheet did not close automatically", file: file, line: line)
+    }
     @MainActor func testDeletionScopeUsesIDsDespiteDuplicateFolderNames() throws {
         let (model, _) = try connected()
         let first = try summary(id: "1", path: #"["Folder"]"#, kind: "folder")
