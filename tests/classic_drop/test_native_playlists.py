@@ -32,6 +32,69 @@ def draft(backend: NativeBackend) -> str:
     return status.revision
 
 
+def test_folder_import_recurses_and_saves_tracks_to_new_playlist(
+    backend: NativeBackend, tmp_path: Path
+) -> None:
+    from classic_drop.native_playlists import ImportDestinationDTO
+    from tests.classic_drop.test_media import media_file
+
+    music = tmp_path / "Music"
+    deep = music / "Artist" / "Album" / "Disc 2"
+    deep.mkdir(parents=True)
+    first = media_file(music, "tone.mp3")
+    second = media_file(deep.parent, "lossless.m4a")
+    third = media_file(deep)
+    (music / "notes.txt").write_text("Not music", encoding="utf-8")
+    (deep / "cover.jpg").write_bytes(b"Not an audio file")
+    (deep / "._hidden.mp3").write_bytes(b"Hidden metadata")
+    call(
+        backend,
+        "playlist_edit",
+        playlist_revision=draft(backend),
+        playlist_edit=PlaylistEdit(PlaylistAction.CREATE, name="Folder Import"),
+    )
+    playlist_id = next(
+        p.id
+        for p in call(backend, "playlist_list").playlist_items
+        if p.name == "Folder Import"
+    )
+    rows = call(backend, "preview", paths=(str(music), str(third))).preview
+    assert tuple(row.path for row in rows) == (
+        str(first),
+        str(second),
+        str(third),
+    )
+    assert all(row.selected for row in rows)
+    call(
+        backend,
+        "import_destination",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        destination=ImportDestinationDTO(playlist_ids=(playlist_id,)),
+    )
+    assert not any(
+        p.name == "Folder Import" for p in backend.engine.active.library.playlists
+    )
+    review = call(
+        backend,
+        "playlist_prepare",
+        playlist_revision=draft(backend),
+        revision=backend.revision,
+        include_imports=True,
+    ).playlist_review
+    assert review is not None and review.added == 3
+    call(backend, "playlist_save", playlist_revision=draft(backend), token=review.token)
+    playlist = next(
+        p for p in backend.engine.active.library.playlists if p.name == "Folder Import"
+    )
+    titles = {
+        track.track_id: track.title for track in backend.engine.active.library.tracks
+    }
+    assert tuple(titles[entry.track_id] for entry in playlist.entries) == tuple(
+        row.title for row in rows
+    )
+
+
 def test_typed_request_rejects_bad_playlist_payload_before_edit() -> None:
     raw: dict[str, Any] = {
         "id": "1",
