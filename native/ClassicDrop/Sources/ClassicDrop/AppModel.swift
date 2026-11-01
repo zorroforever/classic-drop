@@ -663,10 +663,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addFiles(folder: Bool, playlistId: String? = nil) {
+    func importSourcePanel(folder: Bool, playlistId: String? = nil) -> NSOpenPanel {
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = folder; panel.canChooseFiles = !folder
+        panel.canChooseDirectories = folder || playlistId != nil
+        panel.canChooseFiles = !folder
         panel.allowsMultipleSelection = true
+        return panel
+    }
+
+    func addFiles(folder: Bool, playlistId: String? = nil) {
+        let panel = importSourcePanel(folder: folder, playlistId: playlistId)
         panel.begin { [weak self] response in
             guard response == .OK, let self else { return }
             self.prepareImport(paths: panel.urls.map(\.path), playlistId: playlistId)

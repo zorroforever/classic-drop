@@ -70,7 +70,12 @@ Invalid rule input returns a correlated validation error and leaves the draft
 unchanged so the user can correct it and retry.
 
 Imports can target the Library alone, existing ordinary Playlists, or one new
-ordinary Playlist in a selected folder. Review can combine selected imports with
+ordinary Playlist in a selected folder. **Import Music to This Playlist** accepts
+multiple files and Host folders in the same picker. Folders are scanned recursively
+for supported audio, including nested folders; non-audio files, hidden entries and
+symlinks are skipped, and overlapping selections do not repeat the same file.
+The selected Playlist remains the import destination through preview and Review.
+Review can combine selected imports with
 Playlist edits. Saving Playlists alone leaves queued music unimported and requires
 fresh source preparation afterward while preserving Host editing intentions and
 the batch's original-ALAC choice. Temporary destinations continue only through
