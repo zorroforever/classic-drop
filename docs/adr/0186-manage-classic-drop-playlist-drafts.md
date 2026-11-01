@@ -74,6 +74,15 @@ Saving Playlists never authorizes Track deletion, permanent cleanup, or replay
 after helper loss.
 
 Native views use system navigation, tables, sheets, and inspector containers.
+As amended on 2026-11-01, native Playlist entries are cached in Host memory for the
+current connection and Playlist draft revision. Discovery of the Playlist list
+starts sequential background preloading; selected entries take priority, with at
+most two entry pages outstanding and one background page. Only complete lists
+are published and reused during navigation. Revision changes and connection
+invalidation discard this disposable cache and reject old replies. Explicit reload
+refreshes the selected entries. Ordinary and Smart Playlists share loading status,
+including during paging; read failures end loading and permit an explicit retry.
+This does not persist drafts or authorize Smart rule evaluation.
 Liquid Glass APIs are guarded by macOS 26 availability, with standard controls on
 older supported systems. English, Simplified Chinese, and Japanese presentation
 does not translate user data or native rule bytes.

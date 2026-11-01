@@ -25,6 +25,15 @@ window when the Inspector opens. `WindowSetup` owns the window's minimum size.
 ## Playlists
 
 Playlist management follows [ADR-0186](adr/0186-manage-classic-drop-playlist-drafts.md).
+After loading an iPod, the native shell preloads ordinary and Smart Playlist entries
+into a session memory cache. Reopening a completed Playlist uses that cache
+immediately. At most two entry pages are outstanding, with one background page and
+priority for the selected Playlist. Pages construct only the requested entries.
+Both Playlist kinds show a loading spinner and text until all pages finish.
+Draft revision changes, device changes, and disconnects invalidate cached entries;
+an explicit reload refreshes the selected Playlist. This cache is rebuilt after
+reconnection or application restart and never persists unsaved drafts to disk.
+
 The native sidebar provides ordinary Playlists, Smart Playlists and folders.
 Edits stay in a helper-owned draft until **Review Changes** and **Save to iPod**.
 Removing a Playlist Entry or deleting a Playlist preserves Library music.

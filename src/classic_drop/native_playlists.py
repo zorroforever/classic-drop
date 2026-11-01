@@ -273,14 +273,21 @@ class NativePlaylists:
                 playlist_items=bounded_page(rows, request.offset, request.limit),
             )
         if command == "playlist_entries":
+            entries_playlist_id = domain_id(request.token)
             entry_rows = playlist_entries_dto(
-                session.snapshot, domain_id(request.token)
+                session.snapshot,
+                entries_playlist_id,
+                offset=request.offset,
+                limit=request.limit,
+            )
+            total = next(
+                len(p.entries)
+                for p in session.snapshot.playlists
+                if p.playlist_id == entries_playlist_id
             )
             return replace(
-                b._result(total=len(entry_rows), offset=request.offset),
-                playlist_entries=bounded_page(
-                    entry_rows, request.offset, request.limit
-                ),
+                b._result(total=total, offset=request.offset),
+                playlist_entries=bounded_page(entry_rows, 0, request.limit),
             )
         if command == "playlist_fields":
             field_rows = smart_field_descriptors()

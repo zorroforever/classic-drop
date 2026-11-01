@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from classic_drop import playlist_protocol
 from classic_drop.native_backend import NativeBackend
 from classic_drop.native_protocol import Request, Result
 from classic_drop.playlists import PlaylistAction, PlaylistEdit
@@ -30,6 +31,40 @@ def draft(backend: NativeBackend) -> str:
     status = call(backend, "playlist_list").playlist_draft
     assert status is not None
     return status.revision
+
+
+def test_entry_pages_construct_only_requested_rows(
+    backend: NativeBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    track = backend.engine.active.library.tracks[0]
+    call(
+        backend,
+        "playlist_edit",
+        playlist_revision=draft(backend),
+        playlist_edit=PlaylistEdit(
+            PlaylistAction.CREATE,
+            name="Large",
+            track_ids=(track.track_id,) * 501,
+            allow_repeat=True,
+        ),
+    )
+    item = next(
+        p for p in call(backend, "playlist_list").playlist_items if p.name == "Large"
+    )
+    constructed = 0
+    original = playlist_protocol.PlaylistEntryDTO
+
+    def counted(*args: Any, **kwargs: Any) -> playlist_protocol.PlaylistEntryDTO:
+        nonlocal constructed
+        constructed += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(playlist_protocol, "PlaylistEntryDTO", counted)
+    result = call(backend, "playlist_entries", token=item.id, offset=200, limit=1)
+    assert result.total == 501
+    assert len(result.playlist_entries) == 1
+    assert result.playlist_entries[0].index == 200
+    assert constructed == 1
 
 
 def test_typed_request_rejects_bad_playlist_payload_before_edit() -> None:

@@ -382,7 +382,11 @@ class PlaylistEntryDTO:
 
 
 def playlist_entries_dto(
-    snapshot: LibrarySnapshot, playlist_id: int
+    snapshot: LibrarySnapshot,
+    playlist_id: int,
+    *,
+    offset: int = 0,
+    limit: int | None = None,
 ) -> tuple[PlaylistEntryDTO, ...]:
     playlist = next(
         (p for p in snapshot.playlists if p.playlist_id == playlist_id), None
@@ -391,7 +395,8 @@ def playlist_entries_dto(
         raise ValueError("This Playlist is no longer in the Library.")
     tracks = {t.track_id: t for t in snapshot.tracks}
     result = []
-    for index, entry in enumerate(playlist.entries):
+    end = None if limit is None else offset + limit
+    for index, entry in enumerate(playlist.entries[offset:end], start=offset):
         track = tracks.get(entry.track_id)
         result.append(
             PlaylistEntryDTO(

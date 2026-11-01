@@ -141,6 +141,7 @@
 "audio.bit_depth" = "Bit depth";
 "audio.sample_rate" = "Sample rate";
 "audio.loading" = "Reading audio format…";
+"playlist.loading" = "Loading Playlist…";
 "audio.unknown" = "Unknown";
 "audio.unavailable" = "Audio format could not be read";
 "audio.read" = "Read audio formats";
