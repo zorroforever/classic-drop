@@ -20,8 +20,15 @@ Windows report the capability as unavailable.
 
 DeviceCoordinator qualifies current evidence through Device Registry. Only
 normal-mode candidates whose possible profiles are all iPod Classic may be
-mounted. Discovery remains read-only, selection remains explicit, and automatic
-mounting does not write databases or import media.
+mounted. Discovery remains read-only, and automatic mounting does not write
+databases or import media. Selection remains explicit except for the native-shell
+single-candidate policy below.
+
+As amended on 2026-11-01, after discovery the native shell automatically selects
+the sole candidate when it is selectable and there is no Active iPod. It uses the
+existing selection workflow and its validation. Multiple candidates require manual
+selection, including when only one is selectable. Discovery preserves an existing
+Active iPod rather than switching it automatically.
 
 The native Classic Drop shell discovers at startup and polls every five seconds
 when idle or preparing the metadata index, with at most one discovery request
