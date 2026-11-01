@@ -21,6 +21,7 @@ extension AppModel {
     var playlistEditable: Bool { writable && playlistDraft?.locked != true }
     var hasUnsavedPlaylistChanges: Bool { playlistDraft?.dirty == true || !playlistOrderDrafts.isEmpty }
     var hasLocalPlaylistOrder: Bool { selectedPlaylist.map { playlistOrderDrafts[$0] != nil } ?? false }
+    var savingPlaylistReview: Bool { busy && task?.command == "playlist_save" }
     var smartPreviewRunning: Bool { busy && task?.command == "playlist_preview" }
     func cancelSmartPreview() {
         guard smartPreviewRunning, !cancelRequested else { return }

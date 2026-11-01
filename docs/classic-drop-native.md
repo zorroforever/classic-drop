@@ -77,6 +77,12 @@ the batch's original-ALAC choice. Temporary destinations continue only through
 verified saved ID mappings. Saving or restoring never falls back to a same-name
 Playlist. Recovery restores the complete save, including its combined import.
 
+Confirming **Save to iPod** or a combined import closes Review and hands progress
+and cancellation to the main task area. A successful save keeps Review closed
+while the Library refreshes. A failed save reopens the pending Review with its
+error; pending close, eject, or device-selection actions still wait for a
+successful save or an explicit resolution.
+
 Check reads and projects current playback sidecars without writing the iPod.
 Changes after Review require another Check. Disconnect or helper loss invalidates
 draft/Review authority; an interrupted save is never replayed automatically.
