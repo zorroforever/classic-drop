@@ -22,6 +22,22 @@ final class PlaylistModelTests: XCTestCase {
         model.playlistItems = [try summary()]; model.selectedPlaylist = "-1"
         return (model, connection)
     }
+    @MainActor func testFolderImportKeepsNewPlaylistDestinationAfterPreview() throws {
+        let (model, connection) = try connected()
+        let paths = ["/Synthetic/Music", "/Synthetic/another.m4a"]
+        model.prepareImport(paths: paths, playlistId: "-1")
+        XCTAssertEqual(model.workspace, .incoming)
+        XCTAssertEqual(connection.requests.last?.command, "preview")
+        XCTAssertEqual(connection.requests.last?.paths, paths)
+
+        try connection.reply("preview", extra: draft + #", "preview":[],"total":0"#)
+
+        XCTAssertEqual(connection.requests.last?.command, "import_destination")
+        XCTAssertEqual(connection.requests.last?.destination?.playlistIds, ["-1"])
+        XCTAssertEqual(connection.requests.last?.playlistRevision, "p1")
+        XCTAssertFalse(connection.requests.contains { $0.command == "playlist_save" || $0.command == "commit" })
+    }
+
     @MainActor func testEntryPagingGatesOrderAndRemovalUsesOccurrenceIDs() throws {
         let (model, connection) = try connected()
         model.loadPlaylistEntries()
