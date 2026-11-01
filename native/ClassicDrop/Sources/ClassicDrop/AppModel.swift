@@ -352,6 +352,10 @@ final class AppModel: ObservableObject {
         perform("discover", foreground: foreground, configure: { $0.source = foreground ? "manual" : "automatic" }) {
             self.devices = $0.devices ?? []
             if let warnings = $0.warnings, !warnings.isEmpty { self.error = warnings.joined(separator: "\n") }
+            if !self.connected, self.devices.count == 1, let device = self.devices.first, device.selectable {
+                self.select(device.id)
+                return
+            }
             if self.connected && (refreshLibrary || generation != self.state?.generation) {
                 self.refresh()
             }

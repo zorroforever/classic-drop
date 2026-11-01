@@ -11,6 +11,12 @@ system GroupBox. The album grid and dense Library/removal Tables remain content
 views. The retained Qt entry remains available for comparison. Do not run both
 against one iPod.
 
+After manual or background discovery, the native shell automatically selects the
+only discovered iPod when it is selectable and no Active iPod is loaded, then
+loads its Library through the normal selection workflow. Multiple candidates
+require manual selection, even if only one is currently selectable. An existing
+Active iPod is preserved; discovery does not switch it automatically.
+
 The system workspace column fills the available width as the Inspector opens or
 closes. Do not pin its width or duplicate the window's minimum width in the SwiftUI
 root: native column sizing can otherwise center the navigation area or enlarge the

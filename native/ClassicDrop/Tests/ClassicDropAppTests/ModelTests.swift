@@ -21,7 +21,8 @@ final class StubConnection: HelperConnection {
         canKeepContents: Bool = false,
         recoveryPath: String = "",
         artworkCacheKey: String = "",
-        artworkCacheLegacyKey: String = ""
+        artworkCacheLegacyKey: String = "",
+        activeID: String = "device"
     ) throws {
         let request = try XCTUnwrap(requests.last { $0.command == command })
         let json = """
@@ -32,12 +33,74 @@ final class StubConnection: HelperConnection {
         var state = try XCTUnwrap(result["state"] as? [String: Any])
         state["artwork_cache_key"] = artworkCacheKey
         state["artwork_cache_legacy_key"] = artworkCacheLegacyKey
+        state["active_id"] = activeID
         result["state"] = state; object["result"] = result
         onEvent?(try Wire.decoder.decode(Envelope.self, from: JSONSerialization.data(withJSONObject: object)))
     }
 }
 
 final class ModelTests: XCTestCase {
+    @MainActor
+    func testDiscoverySelectsTheOnlyReadyIPodAndLoadsItsLibrary() throws {
+        for foreground in [true, false] {
+            let connection = StubConnection()
+            let model = AppModel(client: connection)
+            model.start()
+            try connection.reply("hello", activeID: "")
+            if foreground { model.discover() }
+            try connection.reply("discover", extra: discoveryDevices([("only", true)]), activeID: "")
+
+            let selection = try XCTUnwrap(connection.requests.last { $0.command == "select" })
+            XCTAssertEqual(selection.token, "only")
+            try connection.reply("select", activeID: "only")
+            XCTAssertTrue(model.connected)
+            XCTAssertTrue(connection.requests.contains { $0.command == "prepare_browser" })
+        }
+    }
+
+    @MainActor
+    func testDiscoveryDoesNotChooseAmongMultipleOrUnreadyIPods() throws {
+        for devices in [[], [("unready", false)], [("one", true), ("two", true)], [("one", true), ("two", false)]] {
+            let connection = StubConnection()
+            let model = AppModel(client: connection)
+            model.start()
+            try connection.reply("hello", activeID: "")
+            try connection.reply("discover", extra: discoveryDevices(devices), activeID: "")
+
+            XCTAssertFalse(model.connected)
+            XCTAssertFalse(connection.requests.contains { $0.command == "select" })
+            XCTAssertFalse(connection.requests.contains { $0.command == "prepare_browser" })
+        }
+    }
+
+    @MainActor
+    func testDiscoveryPreservesActiveIPodAndSelectsAgainAfterDisconnect() throws {
+        let connection = StubConnection()
+        let model = AppModel(client: connection)
+        model.start()
+        try connection.reply("hello")
+        try connection.reply("discover", extra: discoveryDevices([("device", true)]))
+        XCTAssertFalse(connection.requests.contains { $0.command == "select" })
+        try connection.reply("prepare_browser")
+
+        model.discover(foreground: false, refreshLibrary: false)
+        try connection.reply("discover", extra: discoveryDevices([]), generation: "disconnected", activeID: "")
+        XCTAssertFalse(model.connected)
+        model.discover(foreground: false, refreshLibrary: false)
+        try connection.reply("discover", extra: discoveryDevices([("reconnected", true)]), generation: "disconnected", activeID: "")
+        XCTAssertEqual(connection.requests.last?.command, "select")
+        XCTAssertEqual(connection.requests.last?.token, "reconnected")
+    }
+
+    private func discoveryDevices(_ devices: [(String, Bool)]) -> String {
+        let entries = devices.map { id, selectable in
+            """
+            {"id":"\(id)","name":"Synthetic iPod","detail":"Classic","selectable":\(selectable),"available_bytes":100,"total_bytes":200}
+            """
+        }.joined(separator: ",")
+        return ",\"devices\":[\(entries)]"
+    }
+
     @MainActor
     func testInspectorEligibilityTracksWorkspaceAndAlbumDetail() throws {
         let (model, _) = try connected()
