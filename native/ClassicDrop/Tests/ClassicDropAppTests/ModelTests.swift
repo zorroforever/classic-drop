@@ -36,13 +36,6 @@ final class StubConnection: HelperConnection {
 }
 
 final class ModelTests: XCTestCase {
-    func testInspectorDetailWidthLeavesRoomForSystemInspector() {
-        for width: CGFloat in [940, 1180, 1440] {
-            let detail = InspectorLayout.detailColumnWidth(availableWidth: width)
-            XCTAssertLessThanOrEqual(detail + 250 + 360 + 2, width)
-        }
-    }
-
     @MainActor
     func testInspectorEligibilityTracksWorkspaceAndAlbumDetail() throws {
         let (model, _) = try connected()

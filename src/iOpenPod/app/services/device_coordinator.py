@@ -285,6 +285,7 @@ class _VolumePresentationPolicy:
 @dataclass(frozen=True, slots=True)
 class _PreparedLibraryWrite:
     review: LibraryReview
+    source_revision: str
     transaction: StorageTransaction | None
     presentation_policy: _VolumePresentationPolicy
     temporary_files: contextlib.ExitStack
@@ -1217,6 +1218,7 @@ class DeviceCoordinator:
             LibraryReview,
             PreparationCancelledError,
             WriteProgress,
+            overlay_sidecar_snapshot,
         )
         from iPodDB.library import (
             LibraryWriteResult,
@@ -1295,6 +1297,7 @@ class DeviceCoordinator:
                     ),
                 )
             source = active.library_source
+            source_revision = source.begin_draft().source_revision
         plan: LibraryWritePlan | None = None
         resources: WriteResources | None = None
         result: LibraryWriteResult | None = None
@@ -1389,7 +1392,18 @@ class DeviceCoordinator:
                     "The iPod timezone settings could not be verified. Reload before saving."
                 )
             library_resources.recheck(active.session, (active.time_precondition,))
-            library_resources.recheck(active.session, active.sidecar_preconditions)
+            loaded_sidecars = active.sidecar_preconditions
+            if request.reconcile_sidecars:
+                checkpoint("source.sidecars", "Capturing playback sidecars")
+                sidecars, loaded_sidecars = library_resources.load_sidecars(
+                    active.session
+                )
+                source = source.with_sidecars(sidecars)
+                snapshot = overlay_sidecar_snapshot(
+                    expected.library, snapshot, source.snapshot
+                )
+            else:
+                library_resources.recheck(active.session, loaded_sidecars)
             snapshot = refresh_smart_playlists(
                 snapshot,
                 checkpoint=lambda: checkpoint(
@@ -1416,6 +1430,10 @@ class DeviceCoordinator:
                 ),
                 target,
             )
+            if request.reconcile_sidecars:
+                # Even Playlist-only edits bind an empty inventory: a new
+                # firmware input after Review invalidates the whole candidate.
+                plan = replace(plan, requires_sidecar_inventory=True)
             checkpoint("resources.capture", "Capturing required resources")
 
             def source_artwork_paths(
@@ -1447,7 +1465,7 @@ class DeviceCoordinator:
                 ),
                 volume_presentation_enabled=presentation_policy.enabled,
                 consumed_sidecars=source.consumed_sidecars,
-                loaded_sidecars=active.sidecar_preconditions,
+                loaded_sidecars=loaded_sidecars,
             )
             resources = captured.resources
             result = source.prepare(plan, resources, progress=database_progress)
@@ -1459,6 +1477,14 @@ class DeviceCoordinator:
                 ),
             )
             checkpoint("source.recheck", "Verifying source revision")
+            if request.reconcile_sidecars:
+                library_resources.recheck(active.session, loaded_sidecars)
+                if library_resources.pending_sidecars(
+                    active.session, tuple(file.path for file in loaded_sidecars)
+                ):
+                    raise DeviceChangedError(
+                        "Playback sidecars appeared during preparation. Review again."
+                    )
             with self._lock:
                 if self._active is not active or not active.session.is_active:
                     raise DeviceChangedError(
@@ -1524,6 +1550,7 @@ class DeviceCoordinator:
                 ):
                     self._prepared_for_save = _PreparedLibraryWrite(
                         review,
+                        source_revision,
                         write,
                         presentation_policy,
                         temporary_files.pop_all(),
@@ -1624,7 +1651,7 @@ class DeviceCoordinator:
                 or issued.presentation_policy is not self._current_presentation_policy()
                 or plan is None
                 or prepared is None
-                or prepared.source_revision
+                or issued.source_revision
                 != active.library_source.begin_draft().source_revision
             ):
                 return failure(
@@ -2043,6 +2070,7 @@ class DeviceCoordinator:
                     error.recovery_path,
                 )
             except (StorageError, DeviceChangedError, LibrarySyncHelperError) as error:
+                self._discard_prepared_write()
                 return failure(
                     "save.source_unavailable",
                     "The iPod could not be saved. Reconnect or reload before retrying.",

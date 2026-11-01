@@ -11,6 +11,9 @@ struct LibraryView: View {
                 HStack(spacing: 12) {
                     Text(String(format: t("selection.count"), model.selectedTracks.count)).font(.caption).foregroundStyle(.secondary)
                     Spacer()
+                    if model.playlistSupported {
+                        Button(t("playlist.targets")) { model.playlistTrackTargets = true }.disabled(!model.playlistEditable || model.selectedTracks.isEmpty)
+                    }
                     if !model.selectedTracks.isEmpty {
                         Button(t("selection.clear")) { model.selectedTracks = [] }.disabled(model.busy)
                     }
@@ -55,7 +58,7 @@ struct LibraryView: View {
                             model.selectAlbum(album)
                         } label: {
                             VStack(alignment: .leading, spacing: 7) {
-                                CoverView(id: album.artworkId)
+                                CoverView(model: model, id: album.artworkId)
                                 Text(album.title.isEmpty ? t("album.unknown") : album.title)
                                     .font(.headline).lineLimit(1).foregroundStyle(.primary)
                                 Text(album.artist.isEmpty ? t("artist.unknown") : album.artist)
@@ -84,7 +87,7 @@ struct LibraryView: View {
                 Text(t("library") + " / " + album.artist + " / " + album.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             HStack(alignment: .center, spacing: 24) {
-                CoverView(id: album.artworkId).frame(width: 140)
+                CoverView(model: model, id: album.artworkId).frame(width: 140)
                 VStack(alignment: .leading, spacing: 10) {
                     Text(album.title).font(.system(size: 30, weight: .bold)).lineLimit(2)
                     Text(album.artist).font(.title3).foregroundStyle(.secondary)
@@ -126,7 +129,12 @@ struct TrackTable: View {
         } else {
             Table(tracks, selection: $selection) {
             TableColumn("#") { Text($0.trackNumber > 0 ? "\($0.trackNumber)" : "—").foregroundStyle(.secondary) }.width(30)
-            TableColumn(strings.text("title"), value: \.title).width(min: 130, ideal: 220)
+            TableColumn(strings.text("title")) { track in
+                Text(track.title).onDrag {
+                    let ids = model.selectedTracks.contains(track.id) ? model.playlistAvailableTracks.filter { model.selectedTracks.contains($0.id) }.map(\.id) : [track.id]
+                    return NSItemProvider(object: ("tracks:" + ids.joined(separator: ",")) as NSString)
+                }
+            }.width(min: 130, ideal: 220)
             TableColumn(strings.text("artist"), value: \.artist).width(min: 90, ideal: 150)
             TableColumn(strings.text("album"), value: \.album).width(min: 90, ideal: 160)
                 TableColumn(strings.text("audio.codec")) { track in

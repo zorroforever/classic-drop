@@ -6,6 +6,25 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from classic_drop.native_playlists import (
+    ExistingTrackDTO,
+    ImportDestinationDTO,
+    PlaylistIdentityDTO,
+    PlaylistReviewDTO,
+    destination_from_json,
+    reuse_from_json,
+)
+from classic_drop.playlist_protocol import (
+    PlaylistDraftDTO,
+    PlaylistEntryDTO,
+    PlaylistSummaryDTO,
+    SmartFieldDTO,
+    edit_from_json,
+    smart_from_json,
+)
+from classic_drop.playlists import PlaylistEdit
+from iPodDB.library.playlists import SmartPlaylist
+
 VERSION = 1
 MAX_MESSAGE = 1024 * 1024
 MAX_PAGE = 200
@@ -48,11 +67,25 @@ class Request:
     version: int = VERSION
     allow_high_resolution_alac: bool = False
 
+    playlist_revision: str = ""
+    playlist_edit: PlaylistEdit | None = None
+    smart: SmartPlaylist | None = None
+    destination: ImportDestinationDTO | None = None
+    reuse: tuple[ExistingTrackDTO, ...] = ()
+    allow_duplicates: tuple[str, ...] = ()
+    include_imports: bool = False
+    batch_count: int = 0
+
     @classmethod
     def decode(cls, data: bytes) -> Request:
         if len(data) > MAX_MESSAGE:
             raise ValueError("Message exceeds 1 MiB")
-        raw: Any = json.loads(data)
+        try:
+            raw: Any = json.loads(data)
+        except RecursionError:
+            raise ValueError(
+                "JSON nesting exceeds the native transport limit"
+            ) from None
         if not isinstance(raw, dict) or raw.get("version") != VERSION:
             raise ValueError("Unsupported protocol version")
         allowed = set(cls.__dataclass_fields__)
@@ -60,17 +93,32 @@ class Request:
             raise ValueError("Invalid command envelope")
         values: dict[str, Any] = {}
         for name, value in raw.items():
-            if name == "allow_high_resolution_alac":
+            if name == "playlist_edit":
+                value = None if value is None else edit_from_json(value)
+            elif name == "smart":
+                value = None if value is None else smart_from_json(value)
+            elif name == "destination":
+                value = None if value is None else destination_from_json(value)
+            elif name == "reuse":
+                value = reuse_from_json(value)
+            elif name in {"allow_high_resolution_alac", "include_imports"}:
                 if type(value) is not bool:
                     raise ValueError("Invalid ALAC original import option")
-            elif name in {"offset", "limit", "version"}:
+            elif name in {"offset", "limit", "version", "batch_count"}:
                 if type(value) is not int or value < 0:
                     raise ValueError(f"Invalid {name}")
             elif name == "edits":
                 if not isinstance(value, list):
                     raise ValueError("Invalid edits")
                 value = tuple(_edit(item) for item in value)
-            elif name in {"paths", "ids", "playlists", "genres", "years"}:
+            elif name in {
+                "paths",
+                "ids",
+                "playlists",
+                "genres",
+                "years",
+                "allow_duplicates",
+            }:
                 if not isinstance(value, list) or len(value) > 20000:
                     raise ValueError(f"Invalid {name}")
                 expected = int if name == "years" else str
@@ -232,6 +280,19 @@ class Result:
     warnings: tuple[str, ...] = ()
     gui_application: bool = False
     audio_formats: tuple[AudioFormatDTO, ...] = ()
+    capabilities: tuple[str, ...] = ("playlists-v1",)
+    playlist_items: tuple[PlaylistSummaryDTO, ...] = ()
+    playlist_entries: tuple[PlaylistEntryDTO, ...] = ()
+    playlist_draft: PlaylistDraftDTO | None = None
+    smart_fields: tuple[SmartFieldDTO, ...] = ()
+    playlist_review: PlaylistReviewDTO | None = None
+    playlist_id_map: tuple[PlaylistIdentityDTO, ...] = ()
+    destination: ImportDestinationDTO = field(default_factory=ImportDestinationDTO)
+    reuse: tuple[ExistingTrackDTO, ...] = ()
+    allow_duplicates: tuple[str, ...] = ()
+    queue_needs_preparation: bool = False
+    queue_requires_reselection: bool = False
+    batch_token: str = ""
 
 
 @dataclass(frozen=True, slots=True)

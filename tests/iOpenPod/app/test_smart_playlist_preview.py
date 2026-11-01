@@ -345,3 +345,40 @@ def test_purchased_media_kind_and_location_choices_are_evaluated() -> None:
         ),
         tracks,
     ) == (1, 2, 3)
+
+
+def test_preview_cancellation_interrupts_matching_without_partial_results() -> None:
+    calls = 0
+
+    def cancel_during_matching() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise InterruptedError("cancelled during matching")
+
+    with pytest.raises(InterruptedError, match="during matching"):
+        preview_smart_playlist(
+            _TRACKS, SmartPlaylist(), checkpoint=cancel_during_matching
+        )
+    assert calls == 3
+    assert _TRACKS[0].title == "Yesterday"
+
+
+def test_preview_cancellation_interrupts_deep_membership_collection() -> None:
+    playlists = tuple(
+        Playlist(index + 1, str(index), PlaylistKind.FOLDER, parent_id=index or None)
+        for index in range(100)
+    )
+    calls = 0
+
+    def cancel_memberships() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 150:
+            raise InterruptedError("cancelled during membership collection")
+
+    with pytest.raises(InterruptedError, match="membership collection"):
+        preview_smart_playlist(
+            _TRACKS, SmartPlaylist(), playlists=playlists, checkpoint=cancel_memberships
+        )
+    assert calls == 150
