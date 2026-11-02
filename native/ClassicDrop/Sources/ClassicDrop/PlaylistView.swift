@@ -187,8 +187,8 @@ struct PlaylistView: View {
                 TableColumn(t("duration"), value: \.sortDuration) { Text(durationText($0.track?.lengthMs ?? 0)) }.width(65)
             }
             .contextMenu { entryActions(item) }
-            if item.canEditEntries {
-                HStack {
+            HStack {
+                if item.canEditEntries {
                     Button(t("playlist.remove")) { model.changeEntries("remove_entries") }.disabled(model.selectedEntries.isEmpty || !model.playlistEntriesComplete)
                     Button { model.changeEntries("move_entries_up") } label: { Image(systemName: "arrow.up") }.help(t("playlist.up")).disabled(!model.canReorderEntries || model.selectedEntries.isEmpty)
                     Button { model.changeEntries("move_entries_down") } label: { Image(systemName: "arrow.down") }.help(t("playlist.down")).disabled(!model.canReorderEntries || model.selectedEntries.isEmpty)
@@ -200,9 +200,12 @@ struct PlaylistView: View {
                         Button(t("playlist.order.restore")) { model.restorePlaylistOrder() }
                     }
                     Button(t("playlist.order.save")) { model.saveDisplayedPlaylistOrder() }.disabled(!model.canSaveDisplayedPlaylistOrder)
-                    if !model.playlistEntriesComplete { ProgressView().controlSize(.small) }
-                }.padding(12).disabled(!model.playlistEditable)
-            }
+                } else { Spacer() }
+                if model.playlistEntriesLoading {
+                    ProgressView().controlSize(.small).accessibilityLabel(t("playlist.loading"))
+                    Text(t("playlist.loading")).font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(12).disabled(!model.playlistEditable)
         }
     }
     @ViewBuilder private func entryActions(_ item: PlaylistSummaryDTO) -> some View {

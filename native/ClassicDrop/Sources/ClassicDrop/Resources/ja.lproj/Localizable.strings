@@ -141,6 +141,7 @@
 "audio.bit_depth" = "ビット深度";
 "audio.sample_rate" = "サンプルレート";
 "audio.loading" = "音声形式を読み取り中…";
+"playlist.loading" = "プレイリストを読み込み中…";
 "audio.unknown" = "不明";
 "audio.unavailable" = "音声形式を読み取れませんでした";
 "audio.read" = "音声形式を読み取る";

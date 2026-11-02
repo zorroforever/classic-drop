@@ -9,7 +9,7 @@ final class PlaylistModelTests: XCTestCase {
     private let review = #"{"token":"review","operation":"playlist","added":0,"reused":0,"no_changes":false,"change_count":0,"changes":[]}"#
     private func summary(id: String = "-1", parent: String = "null", path: String = #"["List"]"#, kind: String = "playlist") throws -> PlaylistSummaryDTO {
         try Wire.decoder.decode(PlaylistSummaryDTO.self, from: Data("""
-        {"id":"\(id)","parent_id":\(parent),"kind":"\(kind)","name":"List","description":"","path":\(path),"sort_order":1,"sort_supported":true,"editable":true,"protected":false,"dirty":true,"can_edit_entries":true,"can_edit_rules":false,"entry_count":2,"track_count":1,"duration_ms":2000,"missing_entry_count":0,"smart":null}
+        {"id":"\(id)","parent_id":\(parent),"kind":"\(kind)","name":"List","description":"","path":\(path),"sort_order":1,"sort_supported":true,"editable":true,"protected":false,"dirty":true,"can_edit_entries":\(kind == "playlist"),"can_edit_rules":false,"entry_count":2,"track_count":1,"duration_ms":2000,"missing_entry_count":0,"smart":null}
         """.utf8))
     }
     @MainActor private func connected() throws -> (AppModel, StubConnection) {
@@ -53,6 +53,147 @@ final class PlaylistModelTests: XCTestCase {
         XCTAssertEqual(connection.requests.last?.playlistEdit?.entryIds, ["two"])
         XCTAssertNil(connection.requests.last?.playlistEdit?.trackIds)
         XCTAssertEqual(connection.requests.last?.playlistRevision, "p1")
+    }
+    @MainActor func testReopeningAPlaylistUsesCompletedSessionCache() throws {
+        let (model, connection) = try connected()
+        model.playlistItems.append(try summary(id: "2", kind: "smart"))
+        model.openPlaylist("-1")
+        try connection.reply("playlist_entries", extra: entryResult(["a", "b"]))
+        model.openPlaylist("2")
+        XCTAssertFalse(model.playlistEntriesComplete)
+        try connection.reply("playlist_entries", extra: entryResult(["smart"]))
+        let count = connection.requests.count
+
+        model.openPlaylist("-1")
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["a", "b"])
+        XCTAssertTrue(model.playlistEntriesComplete)
+        model.openPlaylist("2")
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["smart"])
+        XCTAssertTrue(model.playlistEntriesComplete)
+        XCTAssertEqual(connection.requests.count, count)
+    }
+    @MainActor func testPlaylistDiscoveryPreloadsOrdinaryAndSmartButNotFolders() throws {
+        let (model, connection) = try connected()
+        model.selectedPlaylist = nil
+        let items = try [summary(), summary(id: "2", kind: "smart"), summary(id: "folder", kind: "folder")]
+        let json = try JSONSerialization.data(withJSONObject: items.map { item in
+            ["id": item.id, "parent_id": NSNull(), "kind": item.kind, "name": item.name,
+             "description": "", "path": ["List"], "sort_order": 1, "sort_supported": true,
+             "editable": true, "protected": false, "dirty": false, "can_edit_entries": item.kind == "playlist",
+             "can_edit_rules": item.kind == "smart", "entry_count": 2, "track_count": 1,
+             "duration_ms": 2000, "missing_entry_count": 0, "smart": NSNull()] as [String: Any]
+        })
+        try connection.reply("playlist_list", extra: draft + ",\"playlist_items\":\(String(decoding: json, as: UTF8.self)),\"total\":3")
+        XCTAssertEqual(connection.requests.last?.command, "playlist_entries")
+        XCTAssertEqual(connection.requests.last?.token, "-1")
+        try connection.reply("playlist_entries", extra: entryResult(["a"]))
+        XCTAssertEqual(connection.requests.last?.token, "2")
+        try connection.reply("playlist_entries", extra: entryResult(["smart"]))
+        let count = connection.requests.count
+        model.openPlaylist("2")
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["smart"])
+        XCTAssertTrue(model.playlistEntriesComplete)
+        model.openPlaylist("-1")
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["a"])
+        XCTAssertEqual(connection.requests.count, count)
+        XCTAssertFalse(connection.requests.contains { $0.command == "playlist_entries" && $0.token == "folder" })
+    }
+    @MainActor func testPlaylistCacheExpiresAfterDraftChangeAndHelperLoss() throws {
+        let (model, connection) = try connected()
+        model.openPlaylist("-1")
+        try connection.reply("playlist_entries", extra: entryResult(["old"]))
+        model.mutatePlaylist(PlaylistEditDTO(action: "evaluate", playlistId: "-1"))
+        try connection.reply("playlist_edit", extra: draft.replacingOccurrences(of: "p1", with: "p2"))
+        XCTAssertFalse(model.playlistEntriesComplete)
+        try connection.reply("playlist_entries", extra: entryResult(["new"]).replacingOccurrences(of: "p1", with: "p2"))
+        model.openPlaylist("-1")
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["new"])
+        connection.onExit?(1)
+        XCTAssertTrue(model.playlistEntries.isEmpty)
+        XCTAssertNil(model.selectedPlaylist)
+    }
+    @MainActor func testSmartLoadingStateCoversEveryPageAndStopsOnFailure() throws {
+        let (model, connection) = try connected()
+        model.playlistItems.append(try summary(id: "2", kind: "smart"))
+        model.openPlaylist("2")
+        XCTAssertFalse(try XCTUnwrap(model.activePlaylist).canEditEntries)
+        XCTAssertTrue(model.playlistEntriesLoading)
+        let row = #"{"entry_id":"one","track_id":"1","index":0,"position":0,"missing_reference":true,"track":null}"#
+        try connection.reply("playlist_entries", extra: draft + ",\"playlist_entries\":[\(row)],\"total\":2")
+        XCTAssertTrue(model.playlistEntriesLoading)
+        XCTAssertFalse(model.playlistEntriesComplete)
+        let count = connection.requests.count
+        try connection.reply("playlist_entries", extra: draft + #", "playlist_entries":[],"total":2"#)
+        XCTAssertFalse(model.playlistEntriesLoading)
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(connection.requests.count, count)
+        model.openPlaylist("2")
+        XCTAssertTrue(model.playlistEntriesLoading)
+        try connection.reply("playlist_entries", extra: entryResult(["smart"]))
+        XCTAssertFalse(model.playlistEntriesLoading)
+        XCTAssertTrue(model.playlistEntriesComplete)
+        connection.onExit?(1)
+        XCTAssertFalse(model.playlistEntriesLoading)
+    }
+    @MainActor func testRapidNavigationBoundsReadsAndPrioritizesCurrentPlaylist() throws {
+        let (model, connection) = try connected()
+        model.playlistItems += [try summary(id: "2"), try summary(id: "3")]
+        model.openPlaylist("-1")
+        let old = try XCTUnwrap(connection.requests.last { $0.command == "playlist_entries" })
+        model.openPlaylist("2")
+        let second = try XCTUnwrap(connection.requests.last { $0.command == "playlist_entries" })
+        model.openPlaylist("3")
+        XCTAssertEqual(connection.requests.filter { $0.command == "playlist_entries" }.count, 2)
+        connection.requests.append(old)
+        try connection.reply("playlist_entries", extra: entryResult(["old"]))
+        XCTAssertEqual(connection.requests.last?.token, "3")
+        XCTAssertTrue(model.playlistEntries.isEmpty)
+        try connection.reply("playlist_entries", extra: entryResult(["current"]))
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["current"])
+        connection.requests.append(second)
+        try connection.reply("playlist_entries", extra: entryResult(["second"]))
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["current"])
+        let count = connection.requests.count
+        model.openPlaylist("-1")
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["old"])
+        XCTAssertEqual(connection.requests.count, count)
+    }
+    @MainActor func testManualDiscoveryRetriesFailedSelectedEntries() throws {
+        let (model, connection) = try connected()
+        model.openPlaylist("-1")
+        try connection.reply("playlist_entries", extra: draft + #", "playlist_entries":[],"total":2"#)
+        XCTAssertFalse(model.playlistEntriesLoading)
+        model.discover()
+        try connection.reply("discover", extra: draft)
+        XCTAssertEqual(connection.requests.filter { $0.command == "playlist_entries" }.count, 2)
+        XCTAssertTrue(model.playlistEntriesLoading)
+        try connection.reply("playlist_entries", extra: entryResult(["retried"]))
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["retried"])
+    }
+    @MainActor func testCancelledBrowserPreparationDoesNotStrandEntryRequests() throws {
+        let (model, connection) = try connected()
+        model.openPlaylist("-1")
+        let old = try XCTUnwrap(connection.requests.last { $0.command == "playlist_entries" })
+        model.browserPreparing = true
+        model.cancel()
+        try connection.reply("playlist_entries", extra: entryResult(["stale"]))
+        let replacement = try XCTUnwrap(connection.requests.last { $0.command == "playlist_entries" })
+        XCTAssertNotEqual(replacement.id, old.id)
+        XCTAssertTrue(model.playlistEntries.isEmpty)
+        try connection.reply("playlist_entries", extra: entryResult(["current"]))
+        XCTAssertEqual(model.playlistEntries.map(\.id), ["current"])
+    }
+    @MainActor func testExplicitReloadsDoNotExceedTwoOutstandingEntryPages() throws {
+        let (model, connection) = try connected()
+        model.openPlaylist("-1")
+        let old = try XCTUnwrap(connection.requests.last { $0.command == "playlist_entries" })
+        model.loadPlaylistEntries()
+        model.loadPlaylistEntries()
+        XCTAssertEqual(connection.requests.filter { $0.command == "playlist_entries" }.count, 2)
+        connection.requests.append(old)
+        try connection.reply("playlist_entries", extra: entryResult(["stale"]))
+        XCTAssertTrue(model.playlistEntries.isEmpty)
+        XCTAssertNotEqual(connection.requests.last?.id, old.id)
     }
     @MainActor func testDraftChangeInvalidatesReviewAndHelperLossClearsAllIdentity() throws {
         let (model, connection) = try connected()

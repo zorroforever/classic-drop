@@ -67,6 +67,13 @@ final class AppModel: ObservableObject {
     @Published var playlistDraft: PlaylistDraftDTO?
     @Published var playlistEntries: [PlaylistEntryDTO] = []
     @Published var playlistEntriesComplete = false
+    @Published var playlistEntriesLoading = false
+    var playlistEntryCache: [String: [PlaylistEntryDTO]] = [:]
+    var playlistEntryBuffers: [String: [PlaylistEntryDTO]] = [:]
+    var playlistEntryRequests: [String: String] = [:]
+    var playlistEntryReadSlots = Set<String>()
+    var playlistEntryFailed = Set<String>()
+    var playlistPrefetchPending: [String] = []
     @Published var playlistOrderDrafts: [String: PlaylistOrderDraft] = [:]
     @Published var selectedPlaylist: String?
     @Published var selectedEntries = Set<String>()
@@ -184,6 +191,10 @@ final class AppModel: ObservableObject {
         do { try client.send(request) }
         catch {
             pending.removeValue(forKey: request.id)
+            if command == "playlist_entries", let id = request.token {
+                playlistEntryReadSlots.remove(request.id)
+                failPlaylistEntryRead(id, requestID: request.id)
+            }
             if ["artwork", "preview_artwork"].contains(command), let token = request.token {
                 finishArtwork(command == "preview_artwork" ? "preview:\(token)" : token, epoch: browserEpoch)
             }
@@ -204,6 +215,7 @@ final class AppModel: ObservableObject {
             return
         }
         guard let operation = pending.removeValue(forKey: envelope.id) else { return }
+        if operation.command == "playlist_entries" { playlistEntryReadSlots.remove(envelope.id) }
         if envelope.id == audioRequestID { audioRequestID = nil }
         let ignoredAudio = envelope.id == ignoredAudioRequestID
         if ignoredAudio { ignoredAudioRequestID = nil }
@@ -214,6 +226,7 @@ final class AppModel: ObservableObject {
             finishArtwork(key, epoch: operation.epoch)
         }
         defer {
+            dispatchPlaylistEntryReads()
             dispatchArtwork()
             dispatchAudioFormats()
         }
@@ -227,6 +240,9 @@ final class AppModel: ObservableObject {
             acceptPlaylistState(result)
         }
         if envelope.event == "error" {
+            if operation.command == "playlist_entries", let id = operation.token {
+                failPlaylistEntryRead(id, requestID: envelope.id)
+            }
             if operation.command == "audio_formats" {
                 for id in operation.ids { audioFormats[id] = AudioFormatDTO(id: id, detail: envelope.detail) }
                 return
@@ -262,6 +278,7 @@ final class AppModel: ObservableObject {
         }
         preparationID = nil
         browserEpoch += 1
+        invalidatePlaylistEntryCache()
         browserPreparing = false; browserReady = false
         tracksLoaded = false; albumsLoaded = false
         allTracks = []; allAlbums = []; musicIDs = []
@@ -310,6 +327,7 @@ final class AppModel: ObservableObject {
         clearBrowser()
         resetPlaylists(warn: false)
         artworkInFlight = []
+        playlistEntryReadSlots = []
         speculativeArtwork = []
         audioRequestID = nil
         ignoredAudioRequestID = nil
@@ -357,7 +375,7 @@ final class AppModel: ObservableObject {
                 return
             }
             if self.connected && (refreshLibrary || generation != self.state?.generation) {
-                self.refresh()
+                self.refresh(reloadPlaylistEntries: foreground && refreshLibrary)
             }
         }
     }
@@ -370,9 +388,10 @@ final class AppModel: ObservableObject {
         perform("select", foreground: true, configure: { $0.token = id }) { _ in self.refresh() }
     }
 
-    func refresh() {
+    func refresh(reloadPlaylistEntries: Bool = false) {
         guard connected else { return }
         if playlistSupported { loadPlaylists() }
+        if reloadPlaylistEntries, selectedPlaylist != nil { loadPlaylistEntries() }
         if browserReady { applyLibraryFilter(); loadFacets(); filter(); loadPackage(); return }
         guard !browserPreparing, !busy else { return }
         browserPreparing = true

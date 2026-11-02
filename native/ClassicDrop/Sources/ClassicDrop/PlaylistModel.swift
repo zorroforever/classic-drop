@@ -78,7 +78,10 @@ extension AppModel {
     func acceptPlaylistState(_ result: ResultDTO) {
         if let capabilities = result.capabilities { playlistSupported = capabilities.contains("playlists-v1") }
         if let draft = result.playlistDraft {
-            if let old = playlistDraft, old.revision != draft.revision { invalidatePlaylistReview() }
+            if let old = playlistDraft, old.revision != draft.revision {
+                invalidatePlaylistReview()
+                invalidatePlaylistEntryCache()
+            }
             playlistDraft = draft
         }
         if let destination = result.destination { importDestination = destination }
@@ -90,7 +93,9 @@ extension AppModel {
         if !preserveTermination, case .close = pendingLifecycle { terminationReply(false) }
         let lost = hasUnsavedPlaylistChanges
         playlistListEpoch += 1; playlistEntryEpoch += 1; smartPreviewEpoch += 1
-        playlistItems = []; playlistDraft = nil; playlistEntries = []; playlistEntriesComplete = false
+        invalidatePlaylistEntryCache()
+        playlistPrefetchPending = []
+        playlistItems = []; playlistDraft = nil; playlistEntries = []; playlistEntriesComplete = false; playlistEntriesLoading = false
         playlistOrderDrafts = [:]
         selectedPlaylist = nil; selectedEntries = []; playlistSortOrder = []; smartFields = []; smartPreview = []
         playlistEditor = nil; playlistDelete = nil; playlistAddSheet = false; playlistTargetSheet = false; playlistTrackTargets = false
@@ -121,7 +126,10 @@ extension AppModel {
                 self.playlistOrderDrafts = self.playlistOrderDrafts.filter { ids.contains($0.key) }
                 if let id = self.selectedPlaylist, !collected.contains(where: { $0.id == id }) {
                     self.selectedPlaylist = nil; self.playlistEntries = []; self.selectedEntries = []
+                    self.playlistEntriesLoading = false
                 }
+                self.playlistPrefetchPending = collected.filter { $0.kind != "folder" }.map(\.id)
+                self.dispatchPlaylistEntryReads()
             }
         }
         page()
@@ -129,32 +137,22 @@ extension AppModel {
     }
     func openPlaylist(_ id: String) {
         selectedPlaylist = id; workspace = .playlist; selectedEntries = []; playlistQuery = ""; playlistSortOrder = []
-        loadPlaylistEntries()
+        loadPlaylistEntries(useCache: true)
     }
-    func loadPlaylistEntries() {
-        playlistEntryEpoch += 1
-        let epoch = playlistEntryEpoch
-        guard let id = selectedPlaylist else { return }
-        playlistEntries = []; playlistEntriesComplete = false
-        var collected: [PlaylistEntryDTO] = []
-        var revision: String?
-        func page() {
-            perform("playlist_entries", configure: { $0.token = id; $0.offset = collected.count; $0.limit = 200 }) { result in
-                guard epoch == self.playlistEntryEpoch, self.selectedPlaylist == id else { return }
-                if let revision, revision != result.playlistDraft?.revision { self.loadPlaylistEntries(); return }
-                revision = result.playlistDraft?.revision
-                let rows = result.playlistEntries ?? []
-                collected += rows
-                if collected.count < (result.total ?? collected.count) {
-                    guard !rows.isEmpty else { self.error = self.t("playlist.incomplete"); return }
-                    page(); return
-                }
-                self.reconcilePlaylistOrder(id, entries: collected)
-                self.playlistEntries = collected; self.playlistEntriesComplete = true
-                self.selectedEntries.formIntersection(Set(collected.map(\.id)))
-            }
+    func loadPlaylistEntries(useCache: Bool = false) {
+        guard let id = selectedPlaylist, activePlaylist?.kind != "folder" else { return }
+        if !useCache {
+            playlistEntryCache.removeValue(forKey: id)
+            playlistEntryBuffers.removeValue(forKey: id)
+            playlistEntryRequests.removeValue(forKey: id)
         }
-        page()
+        if let entries = playlistEntryCache[id] {
+            publishPlaylistEntries(entries, id: id)
+            return
+        }
+        playlistEntries = []; playlistEntriesComplete = false; playlistEntriesLoading = true
+        playlistEntryFailed.remove(id)
+        dispatchPlaylistEntryReads()
     }
     func mutatePlaylist(_ edit: PlaylistEditDTO, then: @escaping () -> Void = {}) {
         guard playlistEditable else { return }

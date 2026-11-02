@@ -141,6 +141,7 @@
 "audio.bit_depth" = "位深";
 "audio.sample_rate" = "采样率";
 "audio.loading" = "读取音频格式…";
+"playlist.loading" = "正在读取播放列表…";
 "audio.unknown" = "未知";
 "audio.unavailable" = "无法读取音频格式";
 "audio.read" = "读取音频格式";
