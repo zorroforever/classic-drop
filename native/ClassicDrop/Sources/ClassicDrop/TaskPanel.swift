@@ -1,6 +1,27 @@
 import SwiftUI
 import ClassicDropCore
 
+struct TaskProgressText {
+    let title: String
+    let item: String
+    let details: String
+
+    init(_ progress: ProgressDTO, strings: Strings) {
+        let translated = strings.text(progress.phase)
+        title = translated == progress.phase ? strings.text("task.start") : translated
+        // Database preparation uses its stage description as the current item.
+        // File names and other user data must remain unchanged.
+        item = progress.phase.hasPrefix("database.") && progress.unit == "steps"
+            && progress.currentItem == progress.message ? title : progress.currentItem
+        var lines = [title]
+        if !item.isEmpty && item != title { lines.append(item) }
+        if let completed = progress.completed {
+            lines.append(progress.total.map { "\(completed) / \($0)" } ?? "\(completed)")
+        }
+        details = lines.joined(separator: "\n")
+    }
+}
+
 struct TaskPanel: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var strings: Strings
@@ -16,8 +37,7 @@ struct TaskPanel: View {
             return t("failed")
         }
         if let progress = task.progress {
-            let translated = t(progress.phase)
-            return translated == progress.phase ? progress.message : translated
+            return TaskProgressText(progress, strings: strings).title
         }
         return t("operation." + task.command)
     }
@@ -32,7 +52,8 @@ struct TaskPanel: View {
                                 Text(title).font(.headline).fixedSize(horizontal: false, vertical: true)
                                 if task.running, let progress = task.progress {
                                     HStack(spacing: 10) {
-                                        if !progress.currentItem.isEmpty { Text(progress.currentItem).lineLimit(1).truncationMode(.middle) }
+                                        let item = TaskProgressText(progress, strings: strings).item
+                                        if !item.isEmpty { Text(item).lineLimit(1).truncationMode(.middle) }
                                         if let completed = progress.completed {
                                             Text(progress.total.map { "\(completed) / \($0)" } ?? "\(completed)")
                                         }
@@ -67,7 +88,7 @@ struct TaskPanel: View {
                             .accessibilityLabel(title)
                         }
                         DisclosureGroup(t("task.details"), isExpanded: $details) {
-                            Text(task.progress?.message ?? task.detail).font(.caption).textSelection(.enabled)
+                            Text(task.running ? task.progress.map { TaskProgressText($0, strings: strings).details } ?? title : task.detail).font(.caption).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }.font(.caption)
                     }
