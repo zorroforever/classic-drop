@@ -29,7 +29,7 @@ It is designed for people who want to keep the music already on an iPod, add a f
 
 ## Screenshots
 
-Actual screenshots of the native SwiftUI app, with English UI below. The [Chinese](README.zh-CN.md#界面截图) and [Japanese](README.ja.md#スクリーンショット) READMEs show the same workspaces in their respective languages. Device names and personal paths are covered with coarse mosaic. Import preparation uses generated demo audio; no import, removal, or restore was executed for these screenshots.
+Actual screenshots of the native SwiftUI app, with English UI below. The [Chinese](README.zh-CN.md#界面截图) and [Japanese](README.ja.md#スクリーンショット) READMEs show the same workspaces in their respective languages. Device names and personal paths are covered with coarse mosaic. Import preparation uses generated demo audio, and the playlist workspace uses a synthetic demo library; no import, removal, or restore was executed for these screenshots.
 
 ### Album library and artwork inspector
 
@@ -48,6 +48,12 @@ Open an album to view its artwork, year, duration, and individual tracks.
 Review selected files, artwork, editable tags, and the original-ALAC option before explicitly importing.
 
 ![English import queue with demo tracks, metadata editor, and ALAC controls](docs/classic-drop/screenshots/import-en.webp)
+
+### Playlist workspace
+
+Review a playlist and its tracks, with the playlist visible in the sidebar.
+
+![English playlist workspace showing the Night Drive playlist and its tracks](docs/classic-drop/screenshots/playlist-en.webp)
 
 ### Removal package and filters
 

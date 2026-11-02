@@ -29,7 +29,7 @@ Classic Drop 是一款原生 macOS 音乐导入工具，面向运行 **Apple 原
 
 ## 界面截图
 
-以下为原生 SwiftUI 应用的实际简体中文界面截图。[英文](README.md#screenshots)和[日文](README.ja.md#スクリーンショット) README 分别展示对应语言的相同工作区。设备名称和个人路径均已打上粗颗粒马赛克。导入准备使用生成的演示音频；截图过程中未执行导入、移除或恢复。
+以下为原生 SwiftUI 应用的实际简体中文界面截图。[英文](README.md#screenshots)和[日文](README.ja.md#スクリーンショット) README 分别展示对应语言的相同工作区。设备名称和个人路径均已打上粗颗粒马赛克。导入准备使用生成的演示音频，播放列表工作区使用合成的演示曲库；截图过程中未执行导入、移除或恢复。
 
 ### 专辑曲库与封面检查器
 
@@ -48,6 +48,12 @@ Classic Drop 是一款原生 macOS 音乐导入工具，面向运行 **Apple 原
 实际导入前，检查所选文件、封面、可编辑标签及原始 ALAC 导入选项。
 
 ![简体中文导入队列，展示演示曲目、元数据编辑器及 ALAC 选项](docs/classic-drop/screenshots/import-zh-CN.webp)
+
+### 播放列表工作区
+
+查看播放列表及其曲目，侧栏中也能看到该播放列表。
+
+![简体中文播放列表工作区，展示 Night Drive 播放列表及其中的曲目](docs/classic-drop/screenshots/playlist-zh-CN.webp)
 
 ### 移除列表与筛选
 
