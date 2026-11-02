@@ -1,15 +1,16 @@
 # README screenshots
 
 The original workspace images were captured from the native SwiftUI application at
-source revision `14063ac` on macOS. The Playlist demo was captured from the current
-native SwiftUI workspace. The release native shell used the documented source
+source revision `14063ac` on macOS. The Playlist images were captured from source revision `a04d21d` using a
+connected iPod in the native SwiftUI workspace, in full screen without macOS window
+controls. The release native shell used the documented source
 Python helper for its original captures.
 
 Each workspace has English (`en`), Simplified Chinese (`zh-CN`), and Japanese (`ja`)
 versions: album library, album details, import preparation, Playlist, and Removal
 Package. The library views show a connected iPod. Import preparation uses generated
-demo audio and artwork. Playlist uses a synthetic demo library so its selected
-playlist and tracks are visible in the sidebar and table. No import, removal, or
+demo audio and artwork. Playlist shows an existing iPod Playlist with its actual
+Tracks and artwork visible in the sidebar and table. No import, removal, or
 restore was executed for the screenshots; the temporary import queue and Removal
 Package were cleared afterward.
 
